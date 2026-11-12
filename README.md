@@ -184,13 +184,14 @@ api.listener.stop();
 
 All library errors are instances of `TikTokError` with a `code`:
 
-| Code                                | Meaning                                    |
-| ----------------------------------- | ------------------------------------------ |
-| `SESSION_EXPIRED`                   | Cookies are no longer valid — log in again |
-| `IM_ERROR`                          | TikTok rejected the request                |
-| `HTTP_ERROR` · `BAD_RESPONSE`       | Network or unexpected response             |
-| `UPLOAD_FAILED` · `DOWNLOAD_FAILED` | Media transfer failed                      |
-| `LOGIN_FAILED` · `LOGIN_ABORTED`    | QR login failed or was cancelled           |
+| Code                                | Meaning                                                                                       |
+| ----------------------------------- | --------------------------------------------------------------------------------------------- |
+| `SESSION_EXPIRED`                   | Cookies are no longer valid — log in again                                                    |
+| `SESSION_BLOCKED`                   | TikTok's gateway refuses this session (JSON `status_code: 7`, seen on sending) — log in again |
+| `IM_ERROR`                          | TikTok rejected the request                                                                   |
+| `HTTP_ERROR` · `BAD_RESPONSE`       | Network or unexpected response                                                                |
+| `UPLOAD_FAILED` · `DOWNLOAD_FAILED` | Media transfer failed                                                                         |
+| `LOGIN_FAILED` · `LOGIN_ABORTED`    | QR login failed or was cancelled                                                              |
 
 ```ts
 import { TikTokError } from 'tca-js';

@@ -14,6 +14,11 @@ export class TikTokError extends Error {
 export type TikTokErrorCode =
   /** Cookie is no longer logged in — a new session is required. */
   | 'SESSION_EXPIRED'
+  /**
+   * TikTok's gateway rejects this session for the command (JSON `status_code: 7` instead of protobuf). Seen on
+   * `message/send` while reads keep working — log in again to get a fresh session.
+   */
+  | 'SESSION_BLOCKED'
   | 'HTTP_ERROR'
   /** IM returned a non-zero `status_code`. */
   | 'IM_ERROR'

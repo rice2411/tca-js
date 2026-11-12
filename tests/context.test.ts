@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { TikTokError } from '../src/errors';
 import { Context, normalizeCookies } from '../src/protocol/context';
 import { DEFAULT_USER_AGENT } from '../src/protocol/constants';
 import { Msg } from '../src/protocol/proto';
@@ -49,5 +50,28 @@ describe('Context', () => {
     // seq increases per request
     const next = Msg.parse(ctx.buildRequest(301, 301, Buffer.alloc(0)));
     expect(next.num(2)).toBe(req.num(2) + 1);
+  });
+});
+
+describe('Context.im — gateway JSON replies', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const reply = (body: string, contentType: string) =>
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(body, { status: 200, headers: { 'content-type': contentType } })),
+    );
+
+  it('maps status_code 7 to SESSION_BLOCKED', async () => {
+    reply('{"status_msg":"","status_code":7}', 'application/json');
+    const err = await new Context({ cookies: {} }).im('/v1/message/send', 100, Buffer.alloc(0)).catch((e) => e);
+    expect(err).toBeInstanceOf(TikTokError);
+    expect(err).toMatchObject({ code: 'SESSION_BLOCKED', upstream: 7 });
+  });
+
+  it('maps other gateway codes to BAD_RESPONSE with the code', async () => {
+    reply('{"status_code":8}', 'application/json; charset=utf-8');
+    const err = await new Context({ cookies: {} }).im('/v1/message/send', 100, Buffer.alloc(0)).catch((e) => e);
+    expect(err).toMatchObject({ code: 'BAD_RESPONSE', upstream: 8 });
   });
 });

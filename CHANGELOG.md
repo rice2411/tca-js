@@ -5,6 +5,14 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-11-12
+
+### Added
+
+- `TikTokError('SESSION_BLOCKED')`: TikTok's gateway answers JSON `status_code: 7` when it refuses a session (seen on
+  `message/send` while reads keep working). Previously surfaced as `BAD_RESPONSE: response is not protobuf`.
+  Other gateway JSON replies are `BAD_RESPONSE` with the code in `upstream`.
+
 ## [0.4.0] - 2026-11-12
 
 No breaking changes — every previously exported symbol keeps its name and type.
@@ -47,6 +55,7 @@ Initial public release.
 - Reactions: read (mobile `e:love` merged into ❤️) and set (`api.setReaction`).
 - Real-time websocket listener with auto-reconnect.
 
+[0.4.1]: https://github.com/rice2411/tca-js/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/rice2411/tca-js/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/rice2411/tca-js/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/rice2411/tca-js/releases/tag/v0.3.0

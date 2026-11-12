@@ -46,6 +46,11 @@ Response {1 cmd, 3 status_code, 4 error, 6 {<cmd>: body}}
 
 `status_code 200005` means the session is not logged in.
 
+A JSON body (`{"status_code": 7, …}`, `content-type: application/json`) instead of protobuf comes from the gateway in
+front of IM: it refused the request before IM saw it. 12/11/2026 one stored session got 7 on every `message/send`
+(even a garbage body) while reads worked; a fresh login passed, unsigned. The web client now also sends
+`tt-ticket-guard-*` headers + `X-Gnarly`/`X-Dynosaur` on `message/send` only — not enforced yet.
+
 | Path                              | Cmd  | Body                                                                                  |
 | --------------------------------- | ---- | ------------------------------------------------------------------------------------- |
 | `/v1/message/send`                | 100  | `{1 convId, 2 1, 3 shortId, 4 content, 5 ext, 6 type, 7 "deprecated", 8 clientMsgId}` |

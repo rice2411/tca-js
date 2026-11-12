@@ -111,7 +111,9 @@ export class Context {
       body: new Uint8Array(this.buildRequest(cmd, bodyField, body)),
     });
     if (!res.ok) throw new TikTokError('HTTP_ERROR', `${path}: HTTP ${res.status}`, res.status);
-    const resp = Msg.tryParse(Buffer.from(await res.arrayBuffer()));
+    const raw = Buffer.from(await res.arrayBuffer());
+    if (/json/i.test(res.headers.get('content-type') ?? '')) throw gatewayError(path, raw);
+    const resp = Msg.tryParse(raw);
     if (!resp) throw new TikTokError('BAD_RESPONSE', `${path}: response is not protobuf`);
     const status = resp.num(Resp.status);
     if (status !== 0) {
@@ -122,4 +124,24 @@ export class Context {
     }
     return resp.msg(Resp.body)?.msg(cmd) ?? resp.msg(Resp.body)?.msg(bodyField) ?? Msg.parse(Buffer.alloc(0));
   }
+}
+
+/**
+ * The gateway in front of the IM server answers with JSON (`{"status_code": 7, …}`) when it refuses a request before it
+ * reaches IM. Observed 12/11/2026: one stored session got 7 on every `message/send` (even a garbage body) while
+ * `mark_read` / `get_by_conversation` kept working; a freshly logged-in session passed — hence `SESSION_BLOCKED`.
+ */
+function gatewayError(path: string, raw: Buffer): TikTokError {
+  let status: unknown;
+  try {
+    status = (JSON.parse(raw.toString('utf8')) as { status_code?: unknown }).status_code;
+  } catch {
+    // not JSON after all
+  }
+  if (status === 7) return new TikTokError('SESSION_BLOCKED', `${path}: gateway status_code 7 — session blocked`, 7);
+  return new TikTokError(
+    'BAD_RESPONSE',
+    `${path}: gateway JSON status_code ${String(status)}`,
+    typeof status === 'number' ? status : undefined,
+  );
 }
