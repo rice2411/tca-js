@@ -4,7 +4,7 @@ export interface CookieInput {
   value: string;
 }
 
-/** What you need to log in again — save it after each login, like zca-js's `{cookie, imei, userAgent}`. */
+/** What you need to log in again — save it after each login. */
 export interface Credentials {
   /** `.tiktok.com` cookies: array of `{name, value}`, object `{name: value}`, or string `a=b; c=d`. */
   cookies: CookieInput[] | Record<string, string> | string;
@@ -101,7 +101,7 @@ export interface TikTokAccount {
   avatar: string;
 }
 
-/** Attachment — like zca-js's `attachments`. */
+/** Image attachment. */
 export interface ImageInput {
   data: Buffer;
   /** Only the extension matters so TikTok knows the format: `photo.jpg`, `bill.png`. */

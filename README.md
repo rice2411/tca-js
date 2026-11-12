@@ -1,142 +1,217 @@
-# tca-js — Unofficial TikTok Chat API
+<div align="center">
 
-Read and send TikTok **direct messages** (text, images, reactions) and receive new messages in real time over
-websocket — **using session cookies only, no browser needed**. Same idea as [`zca-js`](https://github.com/RFS-ADRENO/zca-js)
-for Zalo: it speaks the same protocol as TikTok Web (`tiktok.com/messages`, `tiktok.com/business-suite/messages`).
+# tca-js
+
+**Unofficial TikTok Chat API for Node.js**
+
+Read and send TikTok direct messages, react, and receive new messages in real time.
+
+[![npm](https://img.shields.io/npm/v/tca-js)](https://www.npmjs.com/package/tca-js)
+[![license](https://img.shields.io/github/license/rice2411/tca-js)](LICENSE)
+[![node](https://img.shields.io/node/v/tca-js)](package.json)
+
+</div>
 
 > [!WARNING]
-> This is an **unofficial** library, not affiliated with or endorsed by TikTok / ByteDance. It relies on undocumented
-> internal APIs that can change or break at any time. Automating a TikTok account may violate TikTok's Terms of Service
-> and **can get the account restricted or banned** — use it at your own risk, don't spam.
+> This project is not affiliated with or endorsed by TikTok / ByteDance. It relies on undocumented APIs that can change
+> at any time. Automating an account may violate TikTok's Terms of Service and can get it restricted — use at your own risk.
 
-## Install
+## Table of Contents
+
+- [Features](#features)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Authentication](#authentication)
+- [API Reference](#api-reference)
+- [Listener](#listener)
+- [Error Handling](#error-handling)
+- [Contributing](#contributing)
+- [Support Us](#support-us)
+- [License](#license)
+
+## Features
+
+- 💬 Send text and image messages
+- 📥 List conversations, page through message history, look up users
+- ⚡ Real-time listener over websocket with auto-reconnect
+- 🖼️ Download and decrypt private images, download stickers and avatars
+- ❤️ Read and set reactions, mark conversations as read
+- 🔐 Cookie-based session — no browser at runtime
+- 📱 Optional QR-code login
+- 📦 Written in TypeScript, ships type definitions, one runtime dependency (`ws`)
+
+## Installation
 
 ```bash
 npm install tca-js
 ```
 
-Node.js ≥ 22. QR login additionally needs a local Chrome / Chromium (see below); cookie login does not.
+Requires **Node.js 22+**. QR login also needs a local Chrome or Chromium; cookie login does not.
 
-## Quick start
+## Quick Start
 
 ```ts
-import { TikTok, loginQR } from 'tca-js';
+import { TikTok } from 'tca-js';
 
-const api = await new TikTok().login(await loginQR({ chromePath, onEvent }));  // or saved cookies
+const api = await new TikTok().login({ cookies });
+
 api.listener.on('message', async (msg) => {
   if (msg.isSelf) return;
-  if (msg.image) await api.downloadImage(msg);       // decrypted image Buffer
-  await api.sendMessage(msg, 'Got it, thanks!');     // a message carries its conversation
+  await api.sendMessage(msg, `You said: ${msg.text}`);
 });
-api.listener.start();                                 // reconnects on drop
-await api.sendImage(conv, { data: buf, filename: 'photo.jpg' });
+
+api.listener.start();
 ```
 
-## API
+## Authentication
 
-| Method | Does |
-|---|---|
-| `loginQR({chromePath, onEvent, signal})` | QR login through headless Chrome → `Credentials` |
-| `new TikTok().login({cookies, deviceId?, userAgent?})` | validate cookies (`passport/web/account/info`), resolve `wid` as `device_id` → `API` |
-| `api.getConversations(cursor?)` | 10 conversations per page + latest message; page with `cursor` |
-| `api.getMessages(conv, {limit, before})` | messages of a conversation, newest → oldest |
-| `api.getUsers(uids)` | display name, `@username`, avatar |
-| `api.sendMessage(conv, text)` / `api.sendImage(conv, {data, filename})` | send |
-| `api.setReaction(msg, emoji \| null)` | your reaction on a message (one per user, `null` = remove); read via `msg.reactions` |
-| `api.downloadSticker(msg.sticker)` | sticker image (public CDN) |
-| `api.downloadImage(msg)` | download + decrypt AES-256-GCM (listener messages carry no link — looked up from history) |
-| `api.markRead(msg)` · `api.isAlive()` · `api.getCookies()` | |
-| `api.listener` | events `connected` · `message` · `command` (read receipts…) · `closed` · `error` |
+### Cookies
 
-Errors: `TikTokError.code` — `SESSION_EXPIRED` (get fresh cookies), `IM_ERROR`, `UPLOAD_FAILED`, `DOWNLOAD_FAILED`, `HTTP_ERROR`.
+Log in with the cookies of a `tiktok.com` session. Accepted formats:
 
-## Session — QR login and cookies
+```ts
+await new TikTok().login({ cookies: [{ name: 'sessionid', value: '…' }, /* … */] }); // array
+await new TikTok().login({ cookies: { sessionid: '…', ttwid: '…' } });              // object
+await new TikTok().login({ cookies: 'sessionid=…; ttwid=…' });                      // header string
+```
+
+Required cookies: `sessionid`, `sid_tt`, `sid_guard`, `uid_tt`, `ttwid`, `odin_tt`, `store-idc`, `tt-target-idc`.
+A session lasts about 6 months, and logging in does not sign out other devices.
+
+### QR code
+
+`loginQR` opens a headless Chrome on TikTok's QR page, emits the QR image, and resolves with credentials once the code is
+scanned and confirmed on the phone.
 
 ```ts
 import { loginQR, TikTok } from 'tca-js';
-const creds = await loginQR({ chromePath: '/usr/bin/chromium-browser', onEvent: (e) => { /* qr | scanned | confirmed */ } });
-const api = await new TikTok().login(creds);   // SAVE creds (cookies) to skip scanning next time
+
+const credentials = await loginQR({
+  chromePath: '/usr/bin/chromium-browser',
+  onEvent: (e) => {
+    if (e.type === 'qr') showQr(e.image); // data:image/png;base64,…
+  },
+});
+
+const api = await new TikTok().login(credentials);
+// Save `credentials` to skip scanning next time.
 ```
 
-- **Reading / sending / websocket only need cookies.** The `X-Gnarly`, `X-Dynosaur`, `X-Bogus`, `msToken` signatures
-  and `tt-ticket-guard-*` headers the page attaches to IM requests are **not checked** by the server.
-- **The QR login API (`passport/web/check_qrconnect`) DOES check signatures** — calling it bare from Node returns
-  `error_code 7`. So `loginQR` opens **headless Chrome/Chromium** at `tiktok.com/login/qrcode`, lets the page sign its
-  own requests, and only LISTENS via CDP: the QR image comes from the `get_qrcode` response, status
-  (`new → scanned → confirmed`, or `expired` → reload for a new QR) from `check_qrconnect`. Once confirmed it reads the
-  cookies (`Network.getAllCookies`) and closes Chrome. Works with `--no-sandbox` Chromium on Alpine.
-- Core cookies: `sessionid`, `sid_tt`, `sid_guard`, `uid_tt`, `ttwid`, `odin_tt`, `store-idc`, `tt-target-idc`.
-  `sessionid` lives ~6 months. TikTok allows concurrent sessions — logging in here doesn't kick other devices.
-- `device_id` = the `wid` TikTok issues for a `ttwid` (`/api/v1/web-cookie-privacy/config`). HTTP IM accepts any id
-  but **the websocket only accepts the real `wid`** (made-up id → 400).
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `chromePath` | `string` | — | Path to Chrome / Chromium |
+| `onEvent` | `(e) => void` | — | `qr` · `scanned` · `confirmed` |
+| `signal` | `AbortSignal` | — | Cancel the login |
+| `timeoutMs` | `number` | `300000` | Total time to wait for a scan |
+| `maxRefresh` | `number` | `3` | Max QR regenerations after expiry |
+| `userAgent` | `string` | — | Browser user agent |
 
-## Protocol (for fixing it when TikTok changes)
+## API Reference
 
-**HTTP IM** — `POST https://im-api-sg.tiktok.com/<path>?aid=1988&…`, protobuf request and response.
-`Request {1 cmd, 2 seq, 3 sdk "1.8.5", 5 3, 6 0, 7 build, 8 {<cmd>: body}, 9 device_id, 11 "web", 15 map, 18 1}`,
-`Response {1 cmd, 3 status_code, 4 error, 6 {<cmd>: body}}` (`200005` = not logged in).
+`new TikTok(options?)` — `logger?: (level, msg) => void`, `timeoutMs?: number`.
+`.login(credentials)` resolves to an `API` instance.
 
-| path | cmd | body |
+### Conversations & messages
+
+| Method | Returns | Description |
 |---|---|---|
-| `/v1/message/send` | 100 | `{1 convId, 2 1, 3 shortId, 4 content JSON, 5 ext, 6 type, 7 "deprecated", 8 clientMsgId, [13 image, 14 "private_image", 17 image]}` |
-| `/v2/message/get_by_user_init` | 203 | `{1 offset}` → `{1 messages[], 2 conversations[], 4 next offset, 5 has more}` |
-| `/v1/message/get_by_conversation` | 301 | `{1 convId, 2 1, 3 shortId, 4 1 (older), 5 index anchor, 6 limit}` |
-| `/v3/conversation/mark_read` | 2002 (body at 604) | `{1 convId, 2 shortId, 3 1, 4 index, 11 4}` |
-| `/v1/media/upload_config` | 2059 | empty → ImageX STS keys |
-| `/v1/message/set_property` | 705 | `{1 {1 convId, 2 1, 3 shortId, 4 serverMsgId, 5 clientMsgId, 6 [{1 op 0 add/1 remove, 2 "e:<emoji>", 4 own uid}]}, 2 ticket}` → `{1 status (0 ok, 1 duplicate), 2 version}` |
+| `getConversations(cursor?)` | `ConversationPage` | 10 conversations per page with their latest messages |
+| `getMessages(conv, { limit?, before? })` | `MessagePage` | Messages of a conversation, newest first |
+| `sendMessage(conv, text)` | `SendResult` | Send a text message |
+| `sendImage(conv, { data, filename })` | `SendResult` | Send an image (`Buffer`) |
+| `setReaction(msg, emoji \| null)` | `void` | Set your reaction; `null` removes it |
+| `markRead(msg)` | `void` | Mark the conversation as read up to `msg` |
 
-`MessageBody {1 convId, 3 serverMsgId, 4 index, 5 shortId, 6 type, 7 sender, 8 content JSON, 9 ext, 10 time ms, 15 reactions, 18 quote, 20 image/sticker}`.
-Types: `7` text (`{"aweType":0,"text":…}`), `1802` private image, `1805` sticker, `8` shared video, `1` system, `50001` hidden command.
+`conv` is any object with `conversationId` and `conversationShortId` — every message satisfies it, so you can reply
+with `sendMessage(msg, …)`.
 
-**Reactions** (field 15): `{1 "e:<emoji>", 2 {1 [{1 uid, 3 seconds, 4 idempotent_id, 6 µs}]}}`.
-The mobile app writes ❤️ as both `e:❤️` and the legacy `e:love` key (web ignores `e:love`) → `tca-js` merges them into ❤️.
-Web offers 12 emoji, one reaction per user (add the new key + remove your old one in the same 705 command).
-**Stickers** (`1805`, field 20 → 7): `{1 {1 uri, 2 public CDN url, 5 {w,h}}, 200 {1 {2 map a:sticker_id, a:sticker_type (14 stock / 15 custom)…}}}`.
-TikTok Web only DISPLAYS stickers, it has no send button — sending stickers is not implemented.
-1-1 `convId` = `0:1:<smaller uid>:<larger uid>`.
+### Users & media
 
-**Websocket** — `wss://im-ws-sg.tiktok.com/ws/v2?aid=1459&fpid=9&access_key=…&device_id=<wid>&ttwid=…`
-+ cookies. `access_key = md5("9" + "e1bd35ec9db7b8d846de66ed140b1ad9" + wid + "f8a69f1719916z")`.
-Frame `{1 seq, 2 logid, 3 5, 4 1, 5 headers, 6 encoding ("__lz4" = block compression), 7 "pb", 8 Response}`;
-new message = `Response.cmd 500`, `body[500][5]` is a `MessageBody`. Keep-alive: send text `"hi"` every 15 s.
-Frames with header `need_ack=1` → reply `{1 seq, 2 logid, 3 5, 4 1, 5 {is_ack:1, ack_id, ack_code:0}, 9 ack_id}`,
-`ack_id = <Date.now() base36>:<x_frontier_traceid>`. The server may push a message several times → dedupe by message id.
+| Method | Returns | Description |
+|---|---|---|
+| `getUsers(uids)` | `TikTokUser[]` | Nickname, `@username`, avatar |
+| `downloadImage(msg, 'origin' \| 'thumb')` | `Buffer` | Download and decrypt a private image |
+| `downloadSticker(sticker)` | `{ data, type }` | Download a sticker image |
+| `downloadAvatar(user)` | `{ data, type } \| null` | Download a user's avatar |
 
-**Sending images** — `upload_config` → ImageX signed with AWS SigV4 (`cn-north-1`/`imagex`): `ApplyImageUpload` →
-`POST https://<UploadHost>/upload/v1/<StoreUri>` (headers `Authorization: <Auth>`, `Content-CRC32`,
-**`X-Storage-U: <uid>`** — missing it gives 4004) → `CommitImageUpload` with `Functions: Encryption cipher_v2`
-→ returns `Uri` + `SecretKey` + dimensions → send message type `1802`.
-**Receiving images** — `p0-tiktok-dm-private-sg…` links (need cookies), content is AES-256-GCM:
-`12-byte IV ‖ ciphertext ‖ 16-byte tag`, key = `decrypt_key` (hex) in the message.
+### Session
 
-## Re-discovering the protocol when it breaks
+| Method / property | Description |
+|---|---|
+| `account` | Logged-in account: `uid`, `username`, `screenName`, `avatar` |
+| `getOwnId()` | Own user id |
+| `getCookies()` | Current cookies — persist them to resume the session |
+| `isAlive()` | `true` while the session is still valid |
 
-Run Chrome with a debug port and capture traffic over CDP (`Network.*` for every target, including the chat iframe
-`tiktok.com/messages?scene=business`), then print the protobuf tree without a `.proto`. The web app's message bundle
-(`messages-vmok` manifest) ships full protobufjs schemas — the fastest way to find new commands. Requests the browser
-sends are the reference: rebuild them with `Writer`, drop the signatures, check the server still accepts them.
+### Message object
 
-## Development
+| Field | Type | Description |
+|---|---|---|
+| `kind` | `'text' \| 'image' \| 'sticker' \| 'video' \| 'system' \| 'other'` | Message kind |
+| `text` | `string` | Text content |
+| `image` / `sticker` | `object \| null` | Attachment details |
+| `reactions` | `{ emoji, userIds }[]` | Reactions on the message |
+| `senderId` / `isSelf` | `string` / `boolean` | Sender |
+| `createdAt` | `number` | Epoch milliseconds |
+
+Full typings are shipped in `dist/index.d.ts`.
+
+## Listener
+
+```ts
+api.listener.on('connected', () => console.log('connected'));
+api.listener.on('message', (msg) => { /* new message */ });
+api.listener.on('command', (msg) => { /* read receipts and other hidden commands */ });
+api.listener.on('closed', (code, reason) => {});
+api.listener.on('error', (err) => {});
+
+api.listener.start();   // reconnects automatically; start({ retryOnClose: false }) to disable
+api.listener.stop();
+```
+
+## Error Handling
+
+All library errors are instances of `TikTokError` with a `code`:
+
+| Code | Meaning |
+|---|---|
+| `SESSION_EXPIRED` | Cookies are no longer valid — log in again |
+| `IM_ERROR` | TikTok rejected the request |
+| `HTTP_ERROR` · `BAD_RESPONSE` | Network or unexpected response |
+| `UPLOAD_FAILED` · `DOWNLOAD_FAILED` | Media transfer failed |
+| `LOGIN_FAILED` · `LOGIN_ABORTED` | QR login failed or was cancelled |
+
+```ts
+import { TikTokError } from 'tca-js';
+
+try {
+  await api.sendMessage(conv, 'hi');
+} catch (err) {
+  if (err instanceof TikTokError && err.code === 'SESSION_EXPIRED') {
+    // refresh credentials
+  }
+}
+```
+
+## Contributing
+
+Issues and pull requests are welcome. Protocol notes for maintainers are in [docs/PROTOCOL.md](docs/PROTOCOL.md).
 
 ```bash
-npm install && npm run build
-node scripts/qr-login.mjs <chromePath> <output dir>   # try QR login (writes qr.png)
-node scripts/smoke.mjs --cookies <cookies.json> [--peer <uid>] [--text "…"] [--image <file>] [--listen 10]
+npm install
+npm run build
+node scripts/smoke.mjs --cookies cookies.json   # read-only smoke test against a real account
 ```
-
-`cookies.json` holds a real session — keep it out of the repo (already in `.gitignore`).
-
-Source comments are in Vietnamese. Issues and PRs welcome in English or Vietnamese.
 
 ## Support Us
 
-- ⭐ **Star the repository** if you find it useful!
-- 🔄 **Share** it with your network
-- 💡 **Contribute** ideas and code — issues and PRs welcome
-- ☕ **A coffee** — VietQR (MB Bank · `0776750418`):
+- ⭐ **Star the repository** if you find it useful
+- 🔄 **Share** it with others
+- 💡 **Contribute** ideas and code
+- ☕ **Buy me a coffee** — VietQR (MB Bank · `0776750418`)
 
-  <img src=".github/assets/vietqr-mb.png" alt="VietQR MB Bank 0776750418" width="240">
+<img src=".github/assets/vietqr-mb.png" alt="VietQR MB Bank 0776750418" width="220">
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE) © rice2411

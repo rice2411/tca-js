@@ -1,5 +1,5 @@
 /**
- * tca — TikTok Chat API (emulating TikTok Web), same idea as zca-js for Zalo.
+ * tca-js — unofficial TikTok Chat API (speaks the TikTok Web protocol).
  *
  * ```ts
  * const api = await new TikTok().login({ cookies, deviceId });

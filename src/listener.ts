@@ -31,7 +31,7 @@ export interface ListenerEvents {
   error: [Error];
 }
 
-/** Khung websocket "frontier": {1 seqid, 2 logid, 3 service, 4 method, 5 headers, 6 encoding, 7 type, 8 payload}. */
+/** "Frontier" websocket frame: {1 seqid, 2 logid, 3 service, 4 method, 5 headers, 6 encoding, 7 type, 8 payload}. */
 interface Frame {
   seq: bigint;
   logId: bigint;
@@ -41,7 +41,7 @@ interface Frame {
 }
 
 /**
- * Listen for new messages via the `im-ws-sg` websocket (aid 1459) — cookies only, like zca-js's listener.
+ * Listen for new messages via the `im-ws-sg` websocket (aid 1459) — cookies only.
  * Events: `connected`, `message`, `closed`, `error`.
  */
 export class Listener extends EventEmitter<ListenerEvents> {
