@@ -5,7 +5,7 @@ import type { Context } from './context';
 import { TikTokError } from './errors';
 import type { ImageInput, TikTokImage } from './types';
 
-/** Khoá STS tạm cho kho ảnh — xin qua lệnh IM `UploadConfig`, sống ~10 phút. */
+/** Temporary STS credentials for the image store — obtained via IM command `UploadConfig`, valid ~10 minutes. */
 interface UploadCredential {
   serviceId: string;
   host: string;
@@ -16,7 +16,7 @@ interface UploadCredential {
   expiresAt: number;
 }
 
-/** Ảnh đã tải lên + được kho mã hoá — đủ để gửi tin ảnh. */
+/** Uploaded image, encrypted by the store — enough to send an image message. */
 export interface UploadedImage {
   uri: string;
   secretKey: string;
@@ -35,12 +35,12 @@ export class MediaClient {
 
   constructor(private readonly ctx: Context) {}
 
-  /** `UploadConfig` trả hai bộ khoá: loại 1 = ImageX (ảnh), loại 2 = VOD (video). Lấy loại 1. */
+  /** `UploadConfig` returns two credential sets: type 1 = ImageX (images), type 2 = VOD (video). Use type 1. */
   private async credential(): Promise<UploadCredential> {
     if (this.cred && this.cred.expiresAt - Date.now() > 60_000) return this.cred;
     const body = await this.ctx.im('/v1/media/upload_config', Cmd.UploadConfig, Buffer.alloc(0));
     const c = body.msgs(1).find((m) => m.num(1) === 1);
-    if (!c) throw new TikTokError('UPLOAD_FAILED', 'upload_config không có khoá ImageX');
+    if (!c) throw new TikTokError('UPLOAD_FAILED', 'upload_config has no ImageX credentials');
     this.cred = {
       serviceId: c.str(2),
       host: c.str(3),
@@ -52,7 +52,7 @@ export class MediaClient {
     return this.cred;
   }
 
-  /** Gọi ImageX ký AWS SigV4 (vùng cn-north-1, dịch vụ imagex). */
+  /** Call ImageX signed with AWS SigV4 (region cn-north-1, service imagex). */
   private async imagex<T>(method: 'GET' | 'POST', params: Record<string, string>, body?: string): Promise<T> {
     const c = await this.credential();
     const amzDate = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+/, '');
@@ -98,8 +98,8 @@ export class MediaClient {
   }
 
   /**
-   * Tải ảnh lên kho riêng tư của tin nhắn: Apply → POST file → Commit (kho tự mã hoá AES-GCM
-   * và trả khoá). Kích thước ảnh lấy từ kết quả Commit — không cần tự đọc ảnh.
+   * Upload an image to the private message store: Apply → POST file → Commit (the store encrypts with AES-GCM
+   * and returns the key). Image dimensions come from the Commit result — no need to decode the image.
    */
   async upload(image: ImageInput): Promise<UploadedImage> {
     const c = await this.credential();
@@ -120,14 +120,14 @@ export class MediaClient {
     const addr = apply.Result.UploadAddress;
     const store = addr.StoreInfos[0];
     const host = addr.UploadHosts[0];
-    if (!store || !host) throw new TikTokError('UPLOAD_FAILED', 'ApplyImageUpload không trả chỗ tải lên');
+    if (!store || !host) throw new TikTokError('UPLOAD_FAILED', 'ApplyImageUpload returned no upload target');
 
     const up = await fetch(`https://${host}/upload/v1/${store.StoreUri}`, {
       method: 'POST',
       headers: {
         Authorization: store.Auth,
         'Content-CRC32': (crc32(image.data) >>> 0).toString(16).padStart(8, '0'),
-        // Thiếu header này kho trả 4004 Not Found.
+        // Without this header the store returns 4004 Not Found.
         'X-Storage-U': this.ctx.ownId,
         'Content-Type': 'application/octet-stream',
         'Content-Disposition': 'attachment; filename="undefined"',
@@ -153,7 +153,7 @@ export class MediaClient {
     );
     const enc = commit.Result.Results?.[0]?.Encryption;
     const plugin = commit.Result.PluginResult?.[0];
-    if (!enc?.Uri || !enc.SecretKey) throw new TikTokError('UPLOAD_FAILED', 'CommitImageUpload không trả bản mã hoá');
+    if (!enc?.Uri || !enc.SecretKey) throw new TikTokError('UPLOAD_FAILED', 'CommitImageUpload returned no encrypted result');
     return {
       uri: enc.Uri,
       secretKey: enc.SecretKey,
@@ -164,12 +164,12 @@ export class MediaClient {
     };
   }
 
-  /** Tải ảnh trong tin nhắn về và giải mã. Bố cục: IV 12 byte ‖ bản mã ‖ tag 16 byte. */
+  /** Download and decrypt a message image. Layout: 12-byte IV ‖ ciphertext ‖ 16-byte tag. */
   async download(image: TikTokImage, which: 'origin' | 'thumb' = 'origin'): Promise<Buffer> {
     const url = which === 'thumb' && image.thumbUrl ? image.thumbUrl : image.url;
-    if (!url) throw new TikTokError('DOWNLOAD_FAILED', 'Ảnh không có link');
+    if (!url) throw new TikTokError('DOWNLOAD_FAILED', 'Image has no URL');
     const res = await this.ctx.fetch(url);
-    if (!res.ok) throw new TikTokError('DOWNLOAD_FAILED', `Tải ảnh: HTTP ${res.status}`, res.status);
+    if (!res.ok) throw new TikTokError('DOWNLOAD_FAILED', `Image download: HTTP ${res.status}`, res.status);
     const enc = Buffer.from(await res.arrayBuffer());
     if (!image.decryptKey) return enc;
     try {
@@ -177,7 +177,7 @@ export class MediaClient {
       d.setAuthTag(enc.subarray(enc.length - 16));
       return Buffer.concat([d.update(enc.subarray(12, enc.length - 16)), d.final()]);
     } catch (err) {
-      throw new TikTokError('DOWNLOAD_FAILED', `Giải mã ảnh: ${err instanceof Error ? err.message : String(err)}`);
+      throw new TikTokError('DOWNLOAD_FAILED', `Image decryption: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 }

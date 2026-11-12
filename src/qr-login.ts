@@ -8,31 +8,31 @@ import { TikTokError } from './errors';
 import type { CookieInput, Credentials } from './types';
 
 /**
- * Đăng nhập bằng QR qua Chrome headless.
+ * QR login via headless Chrome.
  *
- * Vì sao cần trình duyệt: API QR của TikTok (`passport/web/check_qrconnect`) đòi chữ ký JS
- * (X-Gnarly / msToken) — gọi trần từ Node bị `error_code 7`. Nên mở đúng trang
- * `tiktok.com/login/qrcode` trong Chrome headless để chính trang tự ký, còn mình chỉ NGHE
- * phản hồi qua CDP: ảnh QR lấy từ body `get_qrcode`, trạng thái từ body `check_qrconnect`.
- * Đăng nhập xong lấy cookie rồi tắt Chrome — mọi việc sau đó (`login`, chat) không cần trình duyệt.
+ * Why a browser: TikTok's QR API (`passport/web/check_qrconnect`) requires a JS signature
+ * (X-Gnarly / msToken) — calling it bare from Node yields `error_code 7`. So we open the real
+ * `tiktok.com/login/qrcode` page in headless Chrome and let it sign itself; we only LISTEN to
+ * responses via CDP: the QR image from the `get_qrcode` body, the status from `check_qrconnect`.
+ * After login we grab the cookies and close Chrome — everything after (`login`, chat) needs no browser.
  */
 
 export type QrLoginEvent =
-  /** Ảnh QR mới (`data:image/png;base64,…`) — hiện cho người dùng quét. Hết hạn thì có ảnh mới. */
+  /** New QR image (`data:image/png;base64,…`) — show it to the user to scan. A new one comes on expiry. */
   | { type: 'qr'; image: string; expiresAt: number }
-  /** Đã quét, chờ bấm xác nhận trên điện thoại. */
+  /** Scanned, waiting for confirmation on the phone. */
   | { type: 'scanned' }
-  /** Đã xác nhận — đang lấy cookie. */
+  /** Confirmed — fetching cookies. */
   | { type: 'confirmed' };
 
 export interface QrLoginOptions {
-  /** Đường dẫn Chrome / Chromium (vd `/usr/bin/chromium-browser`). */
+  /** Path to Chrome / Chromium (e.g. `/usr/bin/chromium-browser`). */
   chromePath: string;
   onEvent?: (e: QrLoginEvent) => void;
   signal?: AbortSignal;
-  /** Tổng thời gian chờ quét (ms) — mặc định 5 phút. */
+  /** Total time to wait for a scan (ms) — default 5 minutes. */
   timeoutMs?: number;
-  /** QR hết hạn (~1 phút) thì tạo lại tối đa chừng này lần. */
+  /** When the QR expires (~1 minute), regenerate it at most this many times. */
   maxRefresh?: number;
   userAgent?: string;
 }
@@ -43,7 +43,7 @@ interface Cdp {
   close(): void;
 }
 
-/** Nối CDP vào một tab mới (một session phẳng trên websocket của trình duyệt). */
+/** Attach CDP to a new tab (a flat session on the browser websocket). */
 async function openTab(browserWs: string): Promise<Cdp> {
   const ws = new WebSocket(browserWs, { perMessageDeflate: false });
   await new Promise<void>((resolve, reject) => {
@@ -87,7 +87,7 @@ async function openTab(browserWs: string): Promise<Cdp> {
   };
 }
 
-/** Chạy Chrome headless, chờ dòng "DevTools listening on ws://…". */
+/** Launch headless Chrome and wait for the "DevTools listening on ws://…" line. */
 async function launchChrome(chromePath: string, userAgent: string): Promise<{ proc: ChildProcess; ws: string; dir: string }> {
   const dir = await mkdtemp(join(tmpdir(), 'tca-chrome-'));
   const proc = spawn(
@@ -100,11 +100,11 @@ async function launchChrome(chromePath: string, userAgent: string): Promise<{ pr
       '--no-default-browser-check',
       '--disable-gpu',
       '--disable-dev-shm-usage',
-      // Trong container chạy root — Chromium đòi tắt sandbox.
+      // Containers run as root — Chromium requires disabling the sandbox.
       '--no-sandbox',
       '--window-size=1280,900',
       '--lang=vi-VN',
-      // UA mặc định của headless có chữ "HeadlessChrome" — thay bằng UA thường.
+      // The default headless UA contains "HeadlessChrome" — replace it with a normal UA.
       `--user-agent=${userAgent}`,
       'about:blank',
     ],
@@ -112,7 +112,7 @@ async function launchChrome(chromePath: string, userAgent: string): Promise<{ pr
   );
   const ws = await new Promise<string>((resolve, reject) => {
     let buf = '';
-    const timer = setTimeout(() => reject(new Error('Chrome không khởi động sau 20s')), 20_000);
+    const timer = setTimeout(() => reject(new Error('Chrome did not start within 20s')), 20_000);
     proc.stderr!.on('data', (d: Buffer) => {
       buf += d.toString();
       const m = /DevTools listening on (ws:\/\/\S+)/.exec(buf);
@@ -127,19 +127,19 @@ async function launchChrome(chromePath: string, userAgent: string): Promise<{ pr
     });
     proc.once('exit', (code) => {
       clearTimeout(timer);
-      reject(new Error(`Chrome thoát (${code}) trước khi sẵn sàng`));
+      reject(new Error(`Chrome exited (${code}) before it was ready`));
     });
   }).catch(async (err: unknown) => {
     proc.kill('SIGKILL');
     await rm(dir, { recursive: true, force: true });
-    throw new TikTokError('LOGIN_FAILED', `Không mở được Chrome: ${err instanceof Error ? err.message : String(err)}`);
+    throw new TikTokError('LOGIN_FAILED', `Failed to launch Chrome: ${err instanceof Error ? err.message : String(err)}`);
   });
   return { proc, ws, dir };
 }
 
 /**
- * Đăng nhập TikTok bằng QR. Trả `Credentials` (cookie `.tiktok.com` + UA) — đưa vào
- * `new TikTok().login(creds)` và LƯU LẠI để lần sau khỏi quét.
+ * Log in to TikTok via QR. Returns `Credentials` (`.tiktok.com` cookies + UA) — pass them to
+ * `new TikTok().login(creds)` and SAVE them so you don't need to scan next time.
  */
 export async function loginQR(opts: QrLoginOptions): Promise<Credentials> {
   const userAgent = opts.userAgent || DEFAULT_USER_AGENT;
@@ -166,10 +166,10 @@ export async function loginQR(opts: QrLoginOptions): Promise<Credentials> {
         else resolve(creds!);
       };
       const timer = setTimeout(
-        () => finish(new TikTokError('LOGIN_FAILED', 'Hết thời gian chờ quét QR')),
+        () => finish(new TikTokError('LOGIN_FAILED', 'Timed out waiting for QR scan')),
         opts.timeoutMs ?? 5 * 60_000,
       );
-      const onAbort = () => finish(new TikTokError('LOGIN_ABORTED', 'Đã huỷ đăng nhập QR'));
+      const onAbort = () => finish(new TikTokError('LOGIN_ABORTED', 'QR login aborted'));
       opts.signal?.addEventListener('abort', onAbort);
 
       const body = async (requestId: string): Promise<{ data?: Record<string, unknown> } | null> => {
@@ -182,13 +182,13 @@ export async function loginQR(opts: QrLoginOptions): Promise<Credentials> {
         }
       };
 
-      /** Sau `confirmed`: trang tự chuyển hướng + đặt cookie phiên — chờ có `sessionid`. */
+      /** After `confirmed`: the page redirects and sets session cookies — wait for `sessionid`. */
       const collectCookies = async () => {
         for (let i = 0; i < 30 && !done; i++) {
           const { cookies } = await tab.send<{ cookies: (CookieInput & { domain: string })[] }>('Network.getAllCookies');
           const mine = cookies.filter((c) => c.domain.endsWith('tiktok.com'));
           if (mine.some((c) => c.name === 'sessionid' && c.value) && mine.some((c) => c.name === 'ttwid')) {
-            // Trùng tên ở `.tiktok.com` và `www.tiktok.com` → giữ bản `.tiktok.com`.
+            // Same name on `.tiktok.com` and `www.tiktok.com` → keep the `.tiktok.com` one.
             const byName = new Map<string, CookieInput>();
             for (const c of mine.sort((a, b) => (a.domain === '.tiktok.com' ? 1 : 0) - (b.domain === '.tiktok.com' ? 1 : 0))) {
               byName.set(c.name, { name: c.name, value: c.value });
@@ -197,7 +197,7 @@ export async function loginQR(opts: QrLoginOptions): Promise<Credentials> {
           }
           await new Promise((r) => setTimeout(r, 1000));
         }
-        finish(new TikTokError('LOGIN_FAILED', 'Đã xác nhận nhưng không thấy cookie sessionid'));
+        finish(new TikTokError('LOGIN_FAILED', 'Confirmed but no sessionid cookie found'));
       };
 
       tab.on((method, p) => {
@@ -221,7 +221,7 @@ export async function loginQR(opts: QrLoginOptions): Promise<Credentials> {
             }
           });
         } else if (url.includes('/passport/web/check_qrconnect/')) {
-          // Trang hỏi song song 3 vùng (sg/us/eu) — chỉ vùng của tài khoản đổi trạng thái, còn lại vẫn "new".
+          // The page polls 3 regions in parallel (sg/us/eu) — only the account's region changes status, the rest stay "new".
           void body(p.requestId as string).then((j) => {
             const status = String(j?.data?.status ?? '');
             if (status === 'scanned' && !scanned) {
@@ -231,7 +231,7 @@ export async function loginQR(opts: QrLoginOptions): Promise<Credentials> {
               opts.onEvent?.({ type: 'confirmed' });
               void collectCookies();
             } else if (status === 'expired' && !scanned) {
-              if (refreshes++ >= maxRefresh) finish(new TikTokError('LOGIN_FAILED', 'QR hết hạn, không ai quét'));
+              if (refreshes++ >= maxRefresh) finish(new TikTokError('LOGIN_FAILED', 'QR expired without being scanned'));
               else void tab.send('Page.reload');
             }
           });

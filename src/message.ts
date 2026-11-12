@@ -10,7 +10,7 @@ function parseJson(s: string): unknown {
   }
 }
 
-/** Ảnh trong `attachments` (trường 20 → 4): 1 = bản gốc, 2 = ảnh nhỏ; mỗi cái {1 uri, 2 url…, 5 {w,h}, 6 khoá}. */
+/** Image in `attachments` (field 20 → 4): 1 = original, 2 = thumbnail; each {1 uri, 2 url…, 5 {w,h}, 6 key}. */
 function parseImage(m: Msg): TikTokImage | null {
   const media = m.msg(MsgF.attachments)?.msg(4);
   const origin = media?.msg(1);
@@ -27,8 +27,8 @@ function parseImage(m: Msg): TikTokImage | null {
 }
 
 /**
- * Sticker (trường 20 → 7): `{1 {1 uri, 2 url, 5 {w,h}}, 2 lời nhắc, 200 {1 {2 map a:sticker_id, a:sticker_type…}}}`.
- * Link trỏ CDN sticker công khai (`…-dm-sticker-sign-…`) — không mã hoá, không cần cookie.
+ * Sticker (field 20 → 7): `{1 {1 uri, 2 url, 5 {w,h}}, 2 hint, 200 {1 {2 map a:sticker_id, a:sticker_type…}}}`.
+ * Links point to the public sticker CDN (`…-dm-sticker-sign-…`) — not encrypted, no cookies needed.
  */
 function parseSticker(m: Msg): TikTokSticker | null {
   const st = m.msg(MsgF.attachments)?.msg(7);
@@ -46,8 +46,8 @@ function parseSticker(m: Msg): TikTokSticker | null {
 }
 
 /**
- * Reaction (trường 15, `property_list`): mỗi phần tử `{1 khoá, 2 {1 PropertyItem[]}}`, khoá `e:<emoji>`,
- * `PropertyItem {1 uid, 3 giây, 4 idempotent_id, 6 µs}`. App điện thoại thả ❤️ ghi cả `e:❤️` lẫn `e:love` → gộp.
+ * Reaction (field 15, `property_list`): each entry `{1 key, 2 {1 PropertyItem[]}}`, key `e:<emoji>`,
+ * `PropertyItem {1 uid, 3 sec, 4 idempotent_id, 6 µs}`. The mobile app writes ❤️ as both `e:❤️` and `e:love` → merged.
  */
 function parseReactions(m: Msg): TikTokReaction[] {
   const byEmoji = new Map<string, Set<string>>();
@@ -101,7 +101,7 @@ export function parseMessage(m: Msg, ownId: string): TikTokMessage {
   };
 }
 
-/** `ConversationInfo` (trường 2 của get_by_user_init): {1 id, 2 shortId, 3 loại, 6 {1 {1 uid}}…}. */
+/** `ConversationInfo` (field 2 of get_by_user_init): {1 id, 2 shortId, 3 type, 6 {1 {1 uid}}…}. */
 export function parseConversation(m: Msg, ownId: string): TikTokConversation {
   const participants = (m.msg(6)?.msgs(1) ?? []).map((p) => p.id(1));
   return {

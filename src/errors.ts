@@ -1,9 +1,9 @@
-/** Lỗi từ TikTok hoặc từ chính thư viện. `code` để bên dùng phân nhánh (vd phiên hết hạn → quét lại). */
+/** Error from TikTok or from the library itself. `code` lets callers branch (e.g. session expired → rescan). */
 export class TikTokError extends Error {
   constructor(
     readonly code: TikTokErrorCode,
     message: string,
-    /** Mã gốc TikTok trả (status_code / error_code) nếu có. */
+    /** Original TikTok code (status_code / error_code), if any. */
     readonly upstream?: number | string,
   ) {
     super(message);
@@ -12,15 +12,15 @@ export class TikTokError extends Error {
 }
 
 export type TikTokErrorCode =
-  /** Cookie không còn đăng nhập — phải lấy phiên mới. */
+  /** Cookie is no longer logged in — a new session is required. */
   | 'SESSION_EXPIRED'
   | 'HTTP_ERROR'
-  /** IM trả `status_code` khác 0. */
+  /** IM returned a non-zero `status_code`. */
   | 'IM_ERROR'
   | 'UPLOAD_FAILED'
   | 'DOWNLOAD_FAILED'
   | 'BAD_RESPONSE'
-  /** Đăng nhập QR không thành (Chrome không mở được, QR hết hạn, không thấy cookie…). */
+  /** QR login failed (Chrome failed to launch, QR expired, no cookie found…). */
   | 'LOGIN_FAILED'
-  /** Bên gọi huỷ đăng nhập QR (`signal`). */
+  /** Caller aborted QR login (`signal`). */
   | 'LOGIN_ABORTED';

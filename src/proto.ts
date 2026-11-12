@@ -1,8 +1,8 @@
 /**
- * Protobuf tối thiểu, không cần file `.proto`.
+ * Minimal protobuf, no `.proto` file needed.
  *
- * TikTok không công bố `.proto` của IM — số trường ở `constants.ts` dựng lại từ byte bắt được
- * trên trình duyệt (09/11/2026). Chỉ cần ba kiểu dây: varint (0), độ dài (2), và bỏ qua 1/5.
+ * TikTok doesn't publish its IM `.proto` — field numbers in `constants.ts` were reconstructed from bytes captured
+ * in the browser (09/11/2026). Only three wire types are needed: varint (0), length-delimited (2), and skipping 1/5.
  */
 
 export interface Field {
@@ -17,7 +17,7 @@ function readVarint(b: Buffer, i: number): [bigint, number] {
   let shift = 0n;
   let c: number;
   do {
-    if (i >= b.length) throw new Error('varint vượt cuối buffer');
+    if (i >= b.length) throw new Error('varint runs past end of buffer');
     c = b[i++];
     x |= BigInt(c & 127) << shift;
     shift += 7n;
@@ -25,7 +25,7 @@ function readVarint(b: Buffer, i: number): [bigint, number] {
   return [x, i];
 }
 
-/** Tách một message thành danh sách trường. `null` nếu byte không phải protobuf hợp lệ. */
+/** Split a message into a list of fields. `null` if the bytes are not valid protobuf. */
 export function decodeFields(b: Buffer): Field[] | null {
   const out: Field[] = [];
   let i = 0;
@@ -61,13 +61,13 @@ export function decodeFields(b: Buffer): Field[] | null {
   return out;
 }
 
-/** Message đã giải — đọc theo số trường. */
+/** Decoded message — read by field number. */
 export class Msg {
   private constructor(readonly fields: Field[]) {}
 
   static parse(b: Buffer): Msg {
     const f = decodeFields(b);
-    if (!f) throw new Error('Không giải được protobuf');
+    if (!f) throw new Error('Failed to decode protobuf');
     return new Msg(f);
   }
 
@@ -89,7 +89,7 @@ export class Msg {
     return Number(this.int(n));
   }
 
-  /** Số nguyên 64-bit dạng chuỗi — uid / mã tin vượt `Number.MAX_SAFE_INTEGER`. */
+  /** 64-bit integer as a string — uids / message IDs exceed `Number.MAX_SAFE_INTEGER`. */
   id(n: number): string {
     return this.int(n).toString();
   }
@@ -117,7 +117,7 @@ export class Msg {
       .filter((m): m is Msg => m !== null);
   }
 
-  /** `map<string,string>` — mỗi phần tử là message `{1: key, 2: value}`. */
+  /** `map<string,string>` — each entry is a message `{1: key, 2: value}`. */
   map(n: number): Record<string, string> {
     const out: Record<string, string> = {};
     for (const m of this.msgs(n)) out[m.str(1)] = m.str(2);
@@ -139,7 +139,7 @@ function varint(x: bigint | number): Buffer {
 
 const key = (n: number, wire: number): Buffer => varint((BigInt(n) << 3n) | BigInt(wire));
 
-/** Ghép message theo thứ tự gọi. */
+/** Build a message in call order. */
 export class Writer {
   private readonly parts: Buffer[] = [];
 
@@ -158,7 +158,7 @@ export class Writer {
     return this.bytes(n, w.finish());
   }
 
-  /** `map<string,string>` theo đúng thứ tự khoá của object. */
+  /** `map<string,string>` in the object's key order. */
   map(n: number, obj: Record<string, string>): this {
     for (const [k, v] of Object.entries(obj)) this.msg(n, new Writer().bytes(1, k).bytes(2, v));
     return this;

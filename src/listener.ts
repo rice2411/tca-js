@@ -8,25 +8,25 @@ import { parseMessage } from './message';
 import { Msg, Writer } from './proto';
 import type { TikTokMessage } from './types';
 
-/** Trình duyệt gửi "hi" mỗi 15–30 giây; lấy cận dưới. */
+/** The browser sends "hi" every 15–30 seconds; use the lower bound. */
 const HEARTBEAT_MS = 15_000;
-/** Không nhận gì (kể cả "hi" đáp lại) quá chừng này thì coi như chết ngầm, nối lại. */
+/** If nothing (not even a "hi" reply) arrives for this long, treat it as silently dead and reconnect. */
 const IDLE_TIMEOUT_MS = 75_000;
 const RECONNECT_MIN_MS = 2_000;
 const RECONNECT_MAX_MS = 60_000;
-/** Server đẩy cùng một tin vài lần (mỗi thiết bị một khung) — nhớ chừng này mã tin để lọc trùng. */
+/** The server pushes the same message several times (one frame per device) — remember this many message IDs to dedupe. */
 const DEDUPE_KEEP = 500;
 
-/** Mã đóng do chính mình gọi `stop()`. */
+/** Close code used when we call `stop()` ourselves. */
 export const MANUAL_CLOSE = 4000;
 
 export interface ListenerEvents {
   connected: [];
-  /** Tin thật trong hội thoại (cả tin của chính mình — xem `isSelf`). */
+  /** A real message in a conversation (including our own — see `isSelf`). */
   message: [TikTokMessage];
-  /** Lệnh ẩn: đánh dấu đã đọc… (`content.command_type`). */
+  /** Hidden command: mark as read… (`content.command_type`). */
   command: [TikTokMessage];
-  /** Mã + lý do đóng. Không phải `MANUAL_CLOSE` thì listener tự nối lại (nếu bật). */
+  /** Close code + reason. Unless `MANUAL_CLOSE`, the listener reconnects automatically (if enabled). */
   closed: [number, string];
   error: [Error];
 }
@@ -41,8 +41,8 @@ interface Frame {
 }
 
 /**
- * Nghe tin mới qua websocket `im-ws-sg` (aid 1459) — chỉ cần cookie, như listener của zca-js.
- * Sự kiện: `connected`, `message`, `closed`, `error`.
+ * Listen for new messages via the `im-ws-sg` websocket (aid 1459) — cookies only, like zca-js's listener.
+ * Events: `connected`, `message`, `closed`, `error`.
  */
 export class Listener extends EventEmitter<ListenerEvents> {
   private ws: WebSocket | null = null;
@@ -72,7 +72,7 @@ export class Listener extends EventEmitter<ListenerEvents> {
       version_code: 'fws_1.0.0',
       access_key: accessKey,
       device_id: this.ctx.deviceId,
-      // Giá trị cookie đã URL-encode sẵn (`1%7C…`) — giải ra để URLSearchParams không mã hoá hai lần.
+      // Cookie value is already URL-encoded (`1%7C…`) — decode it so URLSearchParams doesn't double-encode.
       ttwid: decodeURIComponent(this.ctx.cookies.get('ttwid') ?? ''),
       xsack: '1',
       xaack: '1',
@@ -81,7 +81,7 @@ export class Listener extends EventEmitter<ListenerEvents> {
     return `${IM_WS}?${q}`;
   }
 
-  /** Mở kết nối. `retryOnClose` (mặc định bật): rớt mạng thì tự nối lại, giãn dần tới 1 phút. */
+  /** Open the connection. `retryOnClose` (on by default): reconnect on drop, backing off up to 1 minute. */
   start(opts: { retryOnClose?: boolean } = {}): void {
     this.retry = opts.retryOnClose ?? true;
     this.connect();
@@ -107,12 +107,12 @@ export class Listener extends EventEmitter<ListenerEvents> {
       this.backoff = RECONNECT_MIN_MS;
       this.heartbeat = setInterval(() => ws.readyState === WebSocket.OPEN && ws.send('hi'), HEARTBEAT_MS);
       this.touch();
-      this.ctx.log('debug', 'tca: websocket đã nối');
+      this.ctx.log('debug', 'tca: websocket connected');
       this.emit('connected');
     });
     ws.on('message', (data: Buffer, isBinary: boolean) => {
       this.touch();
-      if (!isBinary) return; // "hi" đáp lại
+      if (!isBinary) return; // "hi" reply
       try {
         this.onFrame(ws, data);
       } catch (err) {
@@ -121,14 +121,14 @@ export class Listener extends EventEmitter<ListenerEvents> {
     });
     ws.on('error', (err) => this.emit('error', err));
     ws.on('close', (code, reason) => {
-      if (this.ws !== ws) return; // kết nối cũ đã bị thay
+      if (this.ws !== ws) return; // old connection was replaced
       this.ws = null;
       this.clearTimers();
       this.emit('closed', code, reason.toString());
       if (!this.retry || code === MANUAL_CLOSE) return;
       const wait = this.backoff;
       this.backoff = Math.min(this.backoff * 2, RECONNECT_MAX_MS);
-      this.ctx.log('warn', `tca: websocket đóng (${code}) — nối lại sau ${wait / 1000}s`);
+      this.ctx.log('warn', `tca: websocket closed (${code}) — reconnecting in ${wait / 1000}s`);
       this.reconnectTimer = setTimeout(() => this.connect(), wait);
     });
   }
@@ -136,7 +136,7 @@ export class Listener extends EventEmitter<ListenerEvents> {
   private touch(): void {
     if (this.idle) clearTimeout(this.idle);
     this.idle = setTimeout(() => {
-      this.ctx.log('warn', 'tca: websocket im lặng quá lâu — nối lại');
+      this.ctx.log('warn', 'tca: websocket silent too long — reconnecting');
       this.ws?.terminate();
     }, IDLE_TIMEOUT_MS);
   }
@@ -162,7 +162,7 @@ export class Listener extends EventEmitter<ListenerEvents> {
     const payload = frame.encoding === '__lz4' ? lz4Decompress(frame.payload) : frame.payload;
     const resp = Msg.tryParse(payload);
     if (!resp || resp.num(Resp.cmd) !== Cmd.NewMessage) return;
-    // NewMessageNotify: {2 conversationId, 3 loại, 4 ?, 5 MessageBody}
+    // NewMessageNotify: {2 conversationId, 3 type, 4 ?, 5 MessageBody}
     const body = resp.msg(Resp.body)?.msg(Cmd.NewMessage)?.msg(5);
     if (!body) return;
     const msg = parseMessage(body, this.ctx.ownId);
@@ -173,7 +173,7 @@ export class Listener extends EventEmitter<ListenerEvents> {
     else this.emit('message', msg);
   }
 
-  /** Báo đã nhận — `ack_id = <giờ base36>:<x_frontier_traceid>`, kèm lại seq/logid của khung. */
+  /** Acknowledge receipt — `ack_id = <base36 time>:<x_frontier_traceid>`, echoing the frame's seq/logid. */
   private ack(ws: WebSocket, f: Frame): void {
     const ackId = `${Date.now().toString(36)}:${f.headers.x_frontier_traceid ?? ''}`;
     const out = new Writer()

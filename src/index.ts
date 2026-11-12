@@ -1,5 +1,5 @@
 /**
- * tca — TikTok Chat API (giả lập TikTok Web), cùng ý tưởng với zca-js cho Zalo.
+ * tca — TikTok Chat API (emulating TikTok Web), same idea as zca-js for Zalo.
  *
  * ```ts
  * const api = await new TikTok().login({ cookies, deviceId });
@@ -10,8 +10,8 @@
  * api.listener.start();
  * ```
  *
- * Lấy cookie lần đầu: `loginQR({ chromePath, onEvent })` — mở Chrome headless ở trang QR của TikTok
- * (API đăng nhập đòi chữ ký JS nên không làm thuần Node được), quét xong trả cookie. Xem README.
+ * Getting cookies the first time: `loginQR({ chromePath, onEvent })` — opens headless Chrome on TikTok's QR page
+ * (the login API requires a JS signature so it can't be done in pure Node), returns cookies after scanning. See README.
  */
 import { API, fetchAccount, fetchWebId } from './api';
 import { Context } from './context';
@@ -21,17 +21,17 @@ import type { Credentials, TikTokOptions } from './types';
 export class TikTok {
   constructor(private readonly options: TikTokOptions = {}) {}
 
-  /** Đăng nhập bằng cookie đã có. Cookie hết hạn → `TikTokError('SESSION_EXPIRED')`. */
+  /** Log in with existing cookies. Expired cookies → `TikTokError('SESSION_EXPIRED')`. */
   async login(credentials: Credentials): Promise<API> {
     const ctx = new Context(credentials, this.options);
     if (!ctx.cookies.get('sessionid') && !ctx.cookies.get('sid_tt')) {
-      throw new TikTokError('SESSION_EXPIRED', 'Cookie không có sessionid');
+      throw new TikTokError('SESSION_EXPIRED', 'Cookie has no sessionid');
     }
     const account = await fetchAccount(ctx);
-    if (!account) throw new TikTokError('SESSION_EXPIRED', 'Cookie TikTok không còn đăng nhập');
+    if (!account) throw new TikTokError('SESSION_EXPIRED', 'TikTok cookie is no longer logged in');
     ctx.ownId = account.uid;
     ctx.deviceId = (await fetchWebId(ctx).catch(() => '')) || ctx.deviceId;
-    if (!ctx.deviceId) throw new TikTokError('BAD_RESPONSE', 'Không lấy được wid (device_id) — cookie thiếu ttwid?');
+    if (!ctx.deviceId) throw new TikTokError('BAD_RESPONSE', 'Could not get wid (device_id) — cookie missing ttwid?');
     return new API(ctx, account);
   }
 }

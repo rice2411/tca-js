@@ -29,17 +29,17 @@ import type {
   TikTokUser,
 } from './types';
 
-/** Mốc "mới nhất" khi đọc lịch sử — lớn hơn mọi `index` (µs). */
+/** "Latest" cursor for reading history — greater than any `index` (µs). */
 const NEWEST = 9_999_999_999_999_999n;
 
-/** Kết quả gửi: mã tin phía client (TikTok trả lại đúng mã này). Mã server tới qua listener (`isSelf`). */
+/** Send result: client-side message id (TikTok echoes it back). The server id arrives via the listener (`isSelf`). */
 export interface SendResult {
   clientMessageId: string;
 }
 
 /**
- * Một phiên TikTok đã đăng nhập — tạo bằng `new TikTok().login(credentials)`.
- * Mọi lệnh đi thẳng HTTP/WS tới TikTok bằng cookie, không cần trình duyệt.
+ * A logged-in TikTok session — create with `new TikTok().login(credentials)`.
+ * All calls go directly over HTTP/WS to TikTok using cookies, no browser needed.
  */
 export class API {
   readonly listener: Listener;
@@ -57,7 +57,7 @@ export class API {
     return this.ctx.ownId;
   }
 
-  /** Cookie hiện tại — lưu lại để lần sau `login` không cần quét QR. */
+  /** Current cookies — save them so the next `login` needs no QR scan. */
   getCookies(): { name: string; value: string }[] {
     return [...this.ctx.cookies].map(([name, value]) => ({ name, value }));
   }
@@ -66,26 +66,26 @@ export class API {
     return { deviceId: this.ctx.deviceId, userAgent: this.ctx.userAgent };
   }
 
-  /** Phiên còn sống không — gọi định kỳ để phát hiện hết hạn sớm. */
+  /** Whether the session is still alive — call periodically to detect expiry early. */
   async isAlive(): Promise<boolean> {
     return (await fetchAccount(this.ctx).catch(() => null)) !== null;
   }
 
-  // ─── Hộp thư ─────────────────────────────────────────────────────────────
+  // ─── Inbox ─────────────────────────────────────────────────────────────────
 
-  /** Hội thoại gần đây + tin mới nhất của chúng, lật trang bằng `cursor`. */
+  /** Recent conversations + their latest messages, paginated with `cursor`. */
   async getConversations(cursor = '0'): Promise<ConversationPage> {
     const body = await this.ctx.im('/v2/message/get_by_user_init', Cmd.GetMessagesByUserInit, new Writer().int(1, BigInt(cursor)).finish());
     return {
       messages: body.msgs(1).map((m) => parseMessage(m, this.ctx.ownId)),
       conversations: body.msgs(2).map((m) => parseConversation(m, this.ctx.ownId)),
-      // Con trỏ = số hội thoại đã lấy (0, 10, 20…) — trường 4; trường 3 là mốc thời gian, không dùng để lật.
+      // Cursor = number of conversations fetched so far (0, 10, 20…) — field 4; field 3 is a timestamp, not used for paging.
       cursor: body.id(4),
       hasMore: body.num(5) === 1,
     };
   }
 
-  /** Tin của một hội thoại, mới nhất trước. Đọc tiếp tin cũ hơn: `before = <index của tin cũ nhất>`. */
+  /** Messages of a conversation, newest first. For older messages: `before = <index of oldest message>`. */
   async getMessages(conv: ConversationRef, opts: { limit?: number; before?: string } = {}): Promise<MessagePage> {
     const limit = Math.min(Math.max(opts.limit ?? 20, 1), 50);
     const body = await this.ctx.im(
@@ -95,7 +95,7 @@ export class API {
         .bytes(1, conv.conversationId)
         .int(2, ConversationType.OneToOne)
         .int(3, BigInt(conv.conversationShortId))
-        .int(4, 1) // hướng: cũ hơn mốc
+        .int(4, 1) // direction: older than cursor
         .int(5, opts.before ? BigInt(opts.before) : NEWEST)
         .int(6, limit)
         .finish(),
@@ -104,7 +104,7 @@ export class API {
     return { messages, hasMore: messages.length >= limit };
   }
 
-  /** Hồ sơ người dùng theo uid (tên hiển thị, @username, ảnh đại diện). */
+  /** User profiles by uid (display name, @username, avatar). */
   async getUsers(uids: string[]): Promise<TikTokUser[]> {
     if (uids.length === 0) return [];
     const q = new URLSearchParams({
@@ -137,8 +137,8 @@ export class API {
   }
 
   /**
-   * Tải ảnh đại diện (thử lần lượt các link, bỏ heic). Không gửi cookie / Referer: CDN ảnh khác miền và
-   * link đã có chữ ký. `null` nếu không link nào tải được.
+   * Download an avatar (tries each URL in turn, skips heic). No cookie / Referer sent: the image CDN is cross-origin and
+   * URLs are already signed. `null` if no URL could be downloaded.
    */
   async downloadAvatar(user: Pick<TikTokUser, 'avatars'>): Promise<{ data: Buffer; type: string } | null> {
     for (const url of user.avatars) {
@@ -154,7 +154,7 @@ export class API {
     return null;
   }
 
-  /** Đánh dấu đã đọc tới tin `msg`. */
+  /** Mark as read up to message `msg`. */
   async markRead(msg: ConversationRef & { index: string }): Promise<void> {
     await this.ctx.im(
       '/v3/conversation/mark_read',
@@ -170,16 +170,16 @@ export class API {
     );
   }
 
-  // ─── Gửi ──────────────────────────────────────────────────────────────────
+  // ─── Send ─────────────────────────────────────────────────────────────────
 
-  /** Gửi tin chữ vào hội thoại (thường là `msg` vừa nhận — nó mang sẵn mã hội thoại). */
+  /** Send a text message to a conversation (usually the just-received `msg` — it carries the conversation ids). */
   async sendMessage(conv: ConversationRef, text: string): Promise<SendResult> {
     const cid = randomUUID();
     await this.send(conv, cid, MessageType.Text, JSON.stringify({ aweType: 0, text }), null);
     return { clientMessageId: cid };
   }
 
-  /** Gửi một ảnh: tải lên kho riêng tư (được mã hoá) rồi gửi tin ảnh. */
+  /** Send an image: upload to the private (encrypted) store, then send an image message. */
   async sendImage(conv: ConversationRef, image: ImageInput): Promise<SendResult> {
     const up = await this.media.upload(image);
     const cid = randomUUID();
@@ -230,9 +230,9 @@ export class API {
   }
 
   /**
-   * Đặt reaction CỦA MÌNH trên một tin — như TikTok Web, mỗi người một reaction: `emoji` mới thay cái cũ,
-   * `null` = gỡ. Truyền nguyên `msg` vừa đọc (cần `reactions` hiện tại để biết gỡ khoá nào).
-   * Gửi `ModifyMessagePropertyRequestBody` (lệnh 705) — xem README.
+   * Set YOUR reaction on a message — like TikTok Web, one reaction per user: a new `emoji` replaces the old one,
+   * `null` = remove. Pass the whole `msg` just read (current `reactions` are needed to know which key to remove).
+   * Sends `ModifyMessagePropertyRequestBody` (command 705) — see README.
    */
   async setReaction(msg: TikTokMessage, emoji: string | null): Promise<void> {
     const own = this.ctx.ownId;
@@ -242,7 +242,7 @@ export class API {
     for (const e of mine) {
       if (e === emoji) continue;
       ops.push({ op: PropertyOp.Remove, key: REACTION_PREFIX + e });
-      // ❤️ thả từ app điện thoại còn nằm ở khoá cũ `e:love` — gỡ luôn kẻo app vẫn hiện tim.
+      // ❤️ sent from the mobile app still uses the legacy key `e:love` — remove it too or the app keeps showing the heart.
       if (e === REACTION_HEART) ops.push({ op: PropertyOp.Remove, key: REACTION_LOVE_KEY });
     }
     if (ops.length === 0) return;
@@ -258,38 +258,38 @@ export class API {
       Cmd.SetMessageProperty,
       new Writer().msg(1, target).bytes(2, 'deprecated').finish(),
     );
-    // status: 0 thành công, 1 gửi trùng (cũng là xong); còn lại TikTok từ chối.
+    // status: 0 success, 1 duplicate (also done); anything else means TikTok rejected it.
     const status = body.num(1);
     if (status > 1) throw new TikTokError('IM_ERROR', `set_property: status ${status}`, status);
   }
 
-  /** Tải ảnh sticker (CDN công khai, không mã hoá, không cần cookie). */
+  /** Download a sticker image (public CDN, unencrypted, no cookie needed). */
   async downloadSticker(sticker: Pick<TikTokSticker, 'url'>): Promise<{ data: Buffer; type: string }> {
     const res = await fetch(sticker.url, {
       headers: { 'User-Agent': this.ctx.userAgent },
       referrerPolicy: 'no-referrer',
       signal: AbortSignal.timeout(this.ctx.options.timeoutMs ?? 20_000),
     }).catch(() => null);
-    if (!res?.ok) throw new TikTokError('DOWNLOAD_FAILED', `Tải sticker lỗi: ${res?.status ?? 'mạng'}`);
+    if (!res?.ok) throw new TikTokError('DOWNLOAD_FAILED', `Sticker download failed: ${res?.status ?? 'network'}`);
     return { data: Buffer.from(await res.arrayBuffer()), type: res.headers.get('content-type') ?? 'image/webp' };
   }
 
-  /** Tải + giải mã ảnh của một tin (truyền cả `msg` — tin từ listener thiếu link, hàm tự tra lại). */
+  /** Download + decrypt a message's image (pass the whole `msg` — listener messages lack the URL, this looks it up). */
   async downloadImage(source: TikTokMessage | TikTokImage, which: 'origin' | 'thumb' = 'origin'): Promise<Buffer> {
     let image = 'serverMessageId' in source ? source.image : source;
-    // Tin đẩy qua websocket chỉ có uri + khoá, không có link tải → tra lại lịch sử theo mã tin.
+    // Websocket-pushed messages only have uri + key, no download URL → look up history by message id.
     if ('serverMessageId' in source && image && !image.url) {
       const { messages } = await this.getMessages(source, { limit: 5, before: (BigInt(source.index) + 1n).toString() });
       image = messages.find((m) => m.serverMessageId === source.serverMessageId)?.image ?? image;
     }
-    if (!image) throw new TikTokError('DOWNLOAD_FAILED', 'Tin không có ảnh');
+    if (!image) throw new TikTokError('DOWNLOAD_FAILED', 'Message has no image');
     return this.media.download(image, which);
   }
 
-  /** `SendMessageRequestBody`: {1 convId, 2 loại hội thoại, 3 shortId, 4 nội dung, 5 ext, 6 loại tin, 7 ticket, 8 client id, …}. */
+  /** `SendMessageRequestBody`: {1 convId, 2 conversation type, 3 shortId, 4 content, 5 ext, 6 message type, 7 ticket, 8 client id, …}. */
   private async send(conv: ConversationRef, cid: string, type: number, content: string, extra: Writer | null): Promise<void> {
     if (!conv.conversationId || !conv.conversationShortId) {
-      throw new TikTokError('IM_ERROR', 'Thiếu conversationId / conversationShortId');
+      throw new TikTokError('IM_ERROR', 'Missing conversationId / conversationShortId');
     }
     const w = new Writer()
       .bytes(1, conv.conversationId)
@@ -305,7 +305,7 @@ export class API {
   }
 }
 
-/** Tài khoản của cookie — `null` nếu cookie không còn đăng nhập. */
+/** Account for the cookie — `null` if the cookie is no longer logged in. */
 export async function fetchAccount(ctx: Context): Promise<TikTokAccount | null> {
   type Res = {
     message?: string;
@@ -322,8 +322,8 @@ export async function fetchAccount(ctx: Context): Promise<TikTokAccount | null> 
 }
 
 /**
- * Link ảnh đại diện trong `avatars` của hồ sơ IM — gom mọi chuỗi `https://…` (cỡ thumb → medium → larger, tuỳ
- * TikTok trả gì), rồi xếp bản trình duyệt đọc được (jpeg/webp/png) lên trước, heic xuống cuối.
+ * Avatar URLs from the IM profile `avatars` — collects every `https://…` string (thumb → medium → larger, whatever
+ * TikTok returns), then puts browser-readable ones (jpeg/webp/png) first and heic last.
  */
 function avatarLinks(avatars: unknown): { avatar: string; avatars: string[] } {
   const urls: string[] = [];
@@ -339,7 +339,7 @@ function avatarLinks(avatars: unknown): { avatar: string; avatars: string[] } {
   return { avatar: ranked[0] ?? '', avatars: ranked };
 }
 
-/** `wid` — mã máy TikTok cấp theo cookie `ttwid`; IM + websocket dùng làm `device_id`. */
+/** `wid` — device id TikTok issues per `ttwid` cookie; IM + websocket use it as `device_id`. */
 export async function fetchWebId(ctx: Context): Promise<string> {
   const res = await ctx.fetch(`${WEB}/api/v1/web-cookie-privacy/config?locale=vi-VN&appId=1988&theme=default&tea=1`);
   if (!res.ok) return '';

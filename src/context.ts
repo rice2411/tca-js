@@ -3,7 +3,7 @@ import { TikTokError } from './errors';
 import { Msg, Writer } from './proto';
 import type { CookieInput, Credentials, TikTokOptions } from './types';
 
-/** Cookie dạng `name → value` từ mọi kiểu đầu vào của `Credentials.cookies`. */
+/** `name → value` cookies from any input shape of `Credentials.cookies`. */
 export function normalizeCookies(input: Credentials['cookies']): Map<string, string> {
   const jar = new Map<string, string>();
   if (typeof input === 'string') {
@@ -19,12 +19,12 @@ export function normalizeCookies(input: Credentials['cookies']): Map<string, str
   return jar;
 }
 
-/** Trạng thái dùng chung của một phiên: cookie, mã máy, uid, gọi HTTP. */
+/** Shared state of a session: cookies, device id, uid, HTTP calls. */
 export class Context {
   readonly cookies: Map<string, string>;
   /**
-   * Mã máy IM = `wid` TikTok cấp theo cookie `ttwid` (`login` tự hỏi). Websocket chỉ nhận đúng
-   * mã này — mã tự bịa bị 400 (HTTP IM thì không kén).
+   * IM device id = the `wid` TikTok issues for the `ttwid` cookie (`login` fetches it). The websocket only
+   * accepts this id — a made-up id gets 400 (HTTP IM isn't picky).
    */
   deviceId: string;
   readonly userAgent: string;
@@ -48,7 +48,7 @@ export class Context {
     this.options.logger?.(level, msg);
   }
 
-  /** `fetch` kèm cookie + UA + hạn chờ. */
+  /** `fetch` with cookies + UA + timeout. */
   async fetch(url: string, init: RequestInit & { headers?: Record<string, string> } = {}): Promise<Response> {
     try {
       return await fetch(url, {
@@ -73,7 +73,7 @@ export class Context {
     return (await res.json()) as T;
   }
 
-  /** Vỏ `Request` của IM: lệnh + body + đầu mục chung. */
+  /** IM `Request` envelope: command + body + common headers. */
   buildRequest(cmd: number, bodyField: number, body: Buffer): Buffer {
     return new Writer()
       .int(1, cmd)
@@ -100,8 +100,8 @@ export class Context {
   }
 
   /**
-   * Gọi một lệnh IM qua HTTP. Trả body đã bóc (`ResponseBody[cmd]`).
-   * KHÔNG cần chữ ký X-Gnarly/X-Bogus/msToken — server IM chỉ xét cookie (thử 09/11/2026).
+   * Call an IM command over HTTP. Returns the unwrapped body (`ResponseBody[cmd]`).
+   * NO X-Gnarly/X-Bogus/msToken signature needed — the IM server only checks cookies (tested 09/11/2026).
    */
   async im(path: string, cmd: number, body: Buffer, bodyField: number = cmd): Promise<Msg> {
     const url = `${IM_API}${path}?aid=${AID_WEB}&version_code=1.0.0&app_name=tiktok_web&device_platform=web_pc`;
@@ -112,11 +112,11 @@ export class Context {
     });
     if (!res.ok) throw new TikTokError('HTTP_ERROR', `${path}: HTTP ${res.status}`, res.status);
     const resp = Msg.tryParse(Buffer.from(await res.arrayBuffer()));
-    if (!resp) throw new TikTokError('BAD_RESPONSE', `${path}: phản hồi không phải protobuf`);
+    if (!resp) throw new TikTokError('BAD_RESPONSE', `${path}: response is not protobuf`);
     const status = resp.num(Resp.status);
     if (status !== 0) {
       const desc = resp.str(Resp.error);
-      // Chưa đăng nhập: 200005 (thử bằng request không cookie).
+      // Not logged in: 200005 (tested with a cookieless request).
       const code = status === 200005 ? 'SESSION_EXPIRED' : 'IM_ERROR';
       throw new TikTokError(code, `${path}: ${status} ${desc}`.trim(), status);
     }

@@ -1,6 +1,6 @@
 /**
- * Giải nén LZ4 dạng block (không có frame header) — khung websocket có
- * `payload_encoding = "__lz4"` nén payload kiểu này. Không kéo thêm thư viện cho ~30 dòng.
+ * LZ4 block decompression (no frame header) — websocket frames with
+ * `payload_encoding = "__lz4"` compress their payload this way. No extra dependency for ~30 lines.
  */
 export function lz4Decompress(src: Buffer): Buffer {
   let out = Buffer.alloc(Math.max(src.length * 4, 1024));
@@ -31,7 +31,7 @@ export function lz4Decompress(src: Buffer): Buffer {
     if (i >= src.length) break;
     const offset = src[i] | (src[i + 1] << 8);
     i += 2;
-    if (offset === 0 || offset > o) throw new Error('lz4: offset hỏng');
+    if (offset === 0 || offset > o) throw new Error('lz4: invalid offset');
     let len = token & 15;
     if (len === 15) {
       let b: number;
@@ -42,7 +42,7 @@ export function lz4Decompress(src: Buffer): Buffer {
     }
     len += 4;
     ensure(len);
-    // Sao từng byte: vùng nguồn và đích được phép chồng nhau.
+    // Copy byte by byte: source and destination ranges may overlap.
     for (let k = 0; k < len; k++, o++) out[o] = out[o - offset];
   }
   return out.subarray(0, o);
