@@ -1,9 +1,9 @@
 import { createDecipheriv, createHash, createHmac, randomBytes } from 'node:crypto';
 import { crc32 } from 'node:zlib';
-import { Cmd, IMAGEX_REGION, IMAGEX_SERVICE, IMAGEX_VERSION } from './constants';
-import type { Context } from './context';
-import { TikTokError } from './errors';
-import type { ImageInput, TikTokImage } from './types';
+import { Cmd, IMAGEX_REGION, IMAGEX_SERVICE, IMAGEX_VERSION } from '../protocol/constants';
+import type { Context } from '../protocol/context';
+import { TikTokError } from '../errors';
+import type { ImageInput, TikTokImage } from '../models/types';
 
 /** Temporary STS credentials for the image store — obtained via IM command `UploadConfig`, valid ~10 minutes. */
 interface UploadCredential {
@@ -28,7 +28,8 @@ export interface UploadedImage {
 
 const sha256 = (s: string | Buffer) => createHash('sha256').update(s).digest('hex');
 const hmac = (k: string | Buffer, s: string) => createHmac('sha256', k).update(s).digest();
-const rfc3986 = (s: string) => encodeURIComponent(s).replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+const rfc3986 = (s: string) =>
+  encodeURIComponent(s).replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
 
 export class MediaClient {
   private cred: UploadCredential | null = null;
@@ -89,10 +90,16 @@ export class MediaClient {
       body,
       signal: AbortSignal.timeout(this.ctx.options.timeoutMs ?? 20_000),
     });
-    const json = (await res.json().catch(() => null)) as { ResponseMetadata?: { Error?: { Message?: string; CodeN?: number } } } | null;
+    const json = (await res.json().catch(() => null)) as {
+      ResponseMetadata?: { Error?: { Message?: string; CodeN?: number } };
+    } | null;
     const err = json?.ResponseMetadata?.Error;
     if (!res.ok || !json || err) {
-      throw new TikTokError('UPLOAD_FAILED', `imagex ${params.Action}: ${err?.Message ?? `HTTP ${res.status}`}`, err?.CodeN ?? res.status);
+      throw new TikTokError(
+        'UPLOAD_FAILED',
+        `imagex ${params.Action}: ${err?.Message ?? `HTTP ${res.status}`}`,
+        err?.CodeN ?? res.status,
+      );
     }
     return json as T;
   }
@@ -137,7 +144,11 @@ export class MediaClient {
     });
     const upJson = (await up.json().catch(() => null)) as { code?: number; message?: string } | null;
     if (!up.ok || upJson?.code !== 2000) {
-      throw new TikTokError('UPLOAD_FAILED', `upload: ${upJson?.message ?? `HTTP ${up.status}`}`, upJson?.code ?? up.status);
+      throw new TikTokError(
+        'UPLOAD_FAILED',
+        `upload: ${upJson?.message ?? `HTTP ${up.status}`}`,
+        upJson?.code ?? up.status,
+      );
     }
 
     type Commit = {
@@ -149,11 +160,15 @@ export class MediaClient {
     const commit = await this.imagex<Commit>(
       'POST',
       { Action: 'CommitImageUpload', Version: IMAGEX_VERSION, ServiceId: c.serviceId },
-      JSON.stringify({ SessionKey: addr.SessionKey, Functions: [{ name: 'Encryption', input: { Config: { copies: 'cipher_v2' } } }] }),
+      JSON.stringify({
+        SessionKey: addr.SessionKey,
+        Functions: [{ name: 'Encryption', input: { Config: { copies: 'cipher_v2' } } }],
+      }),
     );
     const enc = commit.Result.Results?.[0]?.Encryption;
     const plugin = commit.Result.PluginResult?.[0];
-    if (!enc?.Uri || !enc.SecretKey) throw new TikTokError('UPLOAD_FAILED', 'CommitImageUpload returned no encrypted result');
+    if (!enc?.Uri || !enc.SecretKey)
+      throw new TikTokError('UPLOAD_FAILED', 'CommitImageUpload returned no encrypted result');
     return {
       uri: enc.Uri,
       secretKey: enc.SecretKey,

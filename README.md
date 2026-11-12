@@ -25,6 +25,7 @@ Read and send TikTok direct messages, react, and receive new messages in real ti
 - [API Reference](#api-reference)
 - [Listener](#listener)
 - [Error Handling](#error-handling)
+- [Examples](#examples)
 - [Contributing](#contributing)
 - [Support Us](#support-us)
 - [License](#license)
@@ -38,7 +39,7 @@ Read and send TikTok direct messages, react, and receive new messages in real ti
 - ❤️ Read and set reactions, mark conversations as read
 - 🔐 Cookie-based session — no browser at runtime
 - 📱 Optional QR-code login
-- 📦 Written in TypeScript, ships type definitions, one runtime dependency (`ws`)
+- 📦 Written in TypeScript, ships ESM + CommonJS builds with type definitions, one runtime dependency (`ws`)
 
 ## Installation
 
@@ -46,7 +47,14 @@ Read and send TikTok direct messages, react, and receive new messages in real ti
 npm install tca-js
 ```
 
-Requires **Node.js 22+**. QR login also needs a local Chrome or Chromium; cookie login does not.
+Requires **Node.js 22+**. Both ESM and CommonJS are supported:
+
+```ts
+import { TikTok } from 'tca-js'; // ESM / TypeScript
+const { TikTok } = require('tca-js'); // CommonJS
+```
+
+QR login also needs a local Chrome or Chromium; cookie login does not.
 
 ## Quick Start
 
@@ -70,9 +78,9 @@ api.listener.start();
 Log in with the cookies of a `tiktok.com` session. Accepted formats:
 
 ```ts
-await new TikTok().login({ cookies: [{ name: 'sessionid', value: '…' }, /* … */] }); // array
-await new TikTok().login({ cookies: { sessionid: '…', ttwid: '…' } });              // object
-await new TikTok().login({ cookies: 'sessionid=…; ttwid=…' });                      // header string
+await new TikTok().login({ cookies: [{ name: 'sessionid', value: '…' } /* … */] }); // array
+await new TikTok().login({ cookies: { sessionid: '…', ttwid: '…' } }); // object
+await new TikTok().login({ cookies: 'sessionid=…; ttwid=…' }); // header string
 ```
 
 Required cookies: `sessionid`, `sid_tt`, `sid_guard`, `uid_tt`, `ttwid`, `odin_tt`, `store-idc`, `tt-target-idc`.
@@ -87,7 +95,6 @@ scanned and confirmed on the phone.
 import { loginQR, TikTok } from 'tca-js';
 
 const credentials = await loginQR({
-  chromePath: '/usr/bin/chromium-browser',
   onEvent: (e) => {
     if (e.type === 'qr') showQr(e.image); // data:image/png;base64,…
   },
@@ -97,14 +104,14 @@ const api = await new TikTok().login(credentials);
 // Save `credentials` to skip scanning next time.
 ```
 
-| Option | Type | Default | Description |
-|---|---|---|---|
-| `chromePath` | `string` | — | Path to Chrome / Chromium |
-| `onEvent` | `(e) => void` | — | `qr` · `scanned` · `confirmed` |
-| `signal` | `AbortSignal` | — | Cancel the login |
-| `timeoutMs` | `number` | `300000` | Total time to wait for a scan |
-| `maxRefresh` | `number` | `3` | Max QR regenerations after expiry |
-| `userAgent` | `string` | — | Browser user agent |
+| Option       | Type          | Default     | Description                                                                        |
+| ------------ | ------------- | ----------- | ---------------------------------------------------------------------------------- |
+| `chromePath` | `string`      | auto-detect | Path to Chrome / Chromium (falls back to `CHROME_PATH`, then common install paths) |
+| `onEvent`    | `(e) => void` | —           | `qr` · `scanned` · `confirmed`                                                     |
+| `signal`     | `AbortSignal` | —           | Cancel the login                                                                   |
+| `timeoutMs`  | `number`      | `300000`    | Total time to wait for a scan                                                      |
+| `maxRefresh` | `number`      | `3`         | Max QR regenerations after expiry                                                  |
+| `userAgent`  | `string`      | —           | Browser user agent                                                                 |
 
 ## API Reference
 
@@ -113,46 +120,46 @@ const api = await new TikTok().login(credentials);
 
 ### Conversations & messages
 
-| Method | Returns | Description |
-|---|---|---|
-| `getConversations(cursor?)` | `ConversationPage` | 10 conversations per page with their latest messages |
-| `getMessages(conv, { limit?, before? })` | `MessagePage` | Messages of a conversation, newest first |
-| `sendMessage(conv, text)` | `SendResult` | Send a text message |
-| `sendImage(conv, { data, filename })` | `SendResult` | Send an image (`Buffer`) |
-| `setReaction(msg, emoji \| null)` | `void` | Set your reaction; `null` removes it |
-| `markRead(msg)` | `void` | Mark the conversation as read up to `msg` |
+| Method                                   | Returns            | Description                                          |
+| ---------------------------------------- | ------------------ | ---------------------------------------------------- |
+| `getConversations(cursor?)`              | `ConversationPage` | 10 conversations per page with their latest messages |
+| `getMessages(conv, { limit?, before? })` | `MessagePage`      | Messages of a conversation, newest first             |
+| `sendMessage(conv, text)`                | `SendResult`       | Send a text message                                  |
+| `sendImage(conv, { data, filename })`    | `SendResult`       | Send an image (`Buffer`)                             |
+| `setReaction(msg, emoji \| null)`        | `void`             | Set your reaction; `null` removes it                 |
+| `markRead(msg)`                          | `void`             | Mark the conversation as read up to `msg`            |
 
 `conv` is any object with `conversationId` and `conversationShortId` — every message satisfies it, so you can reply
 with `sendMessage(msg, …)`.
 
 ### Users & media
 
-| Method | Returns | Description |
-|---|---|---|
-| `getUsers(uids)` | `TikTokUser[]` | Nickname, `@username`, avatar |
-| `downloadImage(msg, 'origin' \| 'thumb')` | `Buffer` | Download and decrypt a private image |
-| `downloadSticker(sticker)` | `{ data, type }` | Download a sticker image |
-| `downloadAvatar(user)` | `{ data, type } \| null` | Download a user's avatar |
+| Method                                    | Returns                  | Description                          |
+| ----------------------------------------- | ------------------------ | ------------------------------------ |
+| `getUsers(uids)`                          | `TikTokUser[]`           | Nickname, `@username`, avatar        |
+| `downloadImage(msg, 'origin' \| 'thumb')` | `Buffer`                 | Download and decrypt a private image |
+| `downloadSticker(sticker)`                | `{ data, type }`         | Download a sticker image             |
+| `downloadAvatar(user)`                    | `{ data, type } \| null` | Download a user's avatar             |
 
 ### Session
 
-| Method / property | Description |
-|---|---|
-| `account` | Logged-in account: `uid`, `username`, `screenName`, `avatar` |
-| `getOwnId()` | Own user id |
-| `getCookies()` | Current cookies — persist them to resume the session |
-| `isAlive()` | `true` while the session is still valid |
+| Method / property | Description                                                  |
+| ----------------- | ------------------------------------------------------------ |
+| `account`         | Logged-in account: `uid`, `username`, `screenName`, `avatar` |
+| `getOwnId()`      | Own user id                                                  |
+| `getCookies()`    | Current cookies — persist them to resume the session         |
+| `isAlive()`       | `true` while the session is still valid                      |
 
 ### Message object
 
-| Field | Type | Description |
-|---|---|---|
-| `kind` | `'text' \| 'image' \| 'sticker' \| 'video' \| 'system' \| 'other'` | Message kind |
-| `text` | `string` | Text content |
-| `image` / `sticker` | `object \| null` | Attachment details |
-| `reactions` | `{ emoji, userIds }[]` | Reactions on the message |
-| `senderId` / `isSelf` | `string` / `boolean` | Sender |
-| `createdAt` | `number` | Epoch milliseconds |
+| Field                 | Type                                                               | Description              |
+| --------------------- | ------------------------------------------------------------------ | ------------------------ |
+| `kind`                | `'text' \| 'image' \| 'sticker' \| 'video' \| 'system' \| 'other'` | Message kind             |
+| `text`                | `string`                                                           | Text content             |
+| `image` / `sticker`   | `object \| null`                                                   | Attachment details       |
+| `reactions`           | `{ emoji, userIds }[]`                                             | Reactions on the message |
+| `senderId` / `isSelf` | `string` / `boolean`                                               | Sender                   |
+| `createdAt`           | `number`                                                           | Epoch milliseconds       |
 
 Full typings are shipped in `dist/index.d.ts`.
 
@@ -160,12 +167,16 @@ Full typings are shipped in `dist/index.d.ts`.
 
 ```ts
 api.listener.on('connected', () => console.log('connected'));
-api.listener.on('message', (msg) => { /* new message */ });
-api.listener.on('command', (msg) => { /* read receipts and other hidden commands */ });
+api.listener.on('message', (msg) => {
+  /* new message */
+});
+api.listener.on('command', (msg) => {
+  /* read receipts and other hidden commands */
+});
 api.listener.on('closed', (code, reason) => {});
 api.listener.on('error', (err) => {});
 
-api.listener.start();   // reconnects automatically; start({ retryOnClose: false }) to disable
+api.listener.start(); // reconnects automatically; start({ retryOnClose: false }) to disable
 api.listener.stop();
 ```
 
@@ -173,13 +184,13 @@ api.listener.stop();
 
 All library errors are instances of `TikTokError` with a `code`:
 
-| Code | Meaning |
-|---|---|
-| `SESSION_EXPIRED` | Cookies are no longer valid — log in again |
-| `IM_ERROR` | TikTok rejected the request |
-| `HTTP_ERROR` · `BAD_RESPONSE` | Network or unexpected response |
-| `UPLOAD_FAILED` · `DOWNLOAD_FAILED` | Media transfer failed |
-| `LOGIN_FAILED` · `LOGIN_ABORTED` | QR login failed or was cancelled |
+| Code                                | Meaning                                    |
+| ----------------------------------- | ------------------------------------------ |
+| `SESSION_EXPIRED`                   | Cookies are no longer valid — log in again |
+| `IM_ERROR`                          | TikTok rejected the request                |
+| `HTTP_ERROR` · `BAD_RESPONSE`       | Network or unexpected response             |
+| `UPLOAD_FAILED` · `DOWNLOAD_FAILED` | Media transfer failed                      |
+| `LOGIN_FAILED` · `LOGIN_ABORTED`    | QR login failed or was cancelled           |
 
 ```ts
 import { TikTokError } from 'tca-js';
@@ -193,12 +204,19 @@ try {
 }
 ```
 
+## Examples
+
+- [`examples/qr-login.ts`](examples/qr-login.ts) — log in with a QR code and save the credentials to a file
+- [`examples/echo-bot.ts`](examples/echo-bot.ts) — reply to every incoming text message
+
 ## Contributing
 
-Issues and pull requests are welcome. Protocol notes for maintainers are in [docs/PROTOCOL.md](docs/PROTOCOL.md).
+Issues and pull requests are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md). Protocol notes for maintainers are in [docs/PROTOCOL.md](docs/PROTOCOL.md).
 
 ```bash
 npm install
+npm test                                        # unit tests (no network)
+npm run lint && npm run typecheck
 npm run build
 node scripts/smoke.mjs --cookies cookies.json   # read-only smoke test against a real account
 ```

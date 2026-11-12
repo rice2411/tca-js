@@ -12,11 +12,11 @@ Reference for maintainers: how TikTok Web messaging works on the wire. Field lis
 
 ## Overview
 
-| Channel | Endpoint | Auth |
-|---|---|---|
-| HTTP IM | `POST https://im-api-sg.tiktok.com/<path>?aid=1988` | cookies |
-| Websocket | `wss://im-ws-sg.tiktok.com/ws/v2?aid=1459&fpid=9` | cookies + `access_key` |
-| QR login | `tiktok.com/passport/web/*` | cookies + JS signature |
+| Channel   | Endpoint                                            | Auth                   |
+| --------- | --------------------------------------------------- | ---------------------- |
+| HTTP IM   | `POST https://im-api-sg.tiktok.com/<path>?aid=1988` | cookies                |
+| Websocket | `wss://im-ws-sg.tiktok.com/ws/v2?aid=1459&fpid=9`   | cookies + `access_key` |
+| QR login  | `tiktok.com/passport/web/*`                         | cookies + JS signature |
 
 Messaging endpoints only check cookies — the `X-Gnarly`, `X-Dynosaur`, `X-Bogus`, `msToken` signatures and
 `tt-ticket-guard-*` headers sent by the web app can be omitted. The QR login endpoints do verify signatures
@@ -25,12 +25,12 @@ through CDP.
 
 ## Session
 
-| Item | Notes |
-|---|---|
-| Account check | `passport/web/account/info` |
-| `device_id` | The `wid` issued for a `ttwid` by `/api/v1/web-cookie-privacy/config` |
-| HTTP | Accepts any `device_id` |
-| Websocket | Accepts only the real `wid` (otherwise HTTP 400) |
+| Item          | Notes                                                                 |
+| ------------- | --------------------------------------------------------------------- |
+| Account check | `passport/web/account/info`                                           |
+| `device_id`   | The `wid` issued for a `ttwid` by `/api/v1/web-cookie-privacy/config` |
+| HTTP          | Accepts any `device_id`                                               |
+| Websocket     | Accepts only the real `wid` (otherwise HTTP 400)                      |
 
 QR login flow (observed via CDP): `get_qrcode` returns the image → `check_qrconnect` reports
 `new → scanned → confirmed` (or `expired`, then reload) → read cookies with `Network.getAllCookies`.
@@ -46,14 +46,14 @@ Response {1 cmd, 3 status_code, 4 error, 6 {<cmd>: body}}
 
 `status_code 200005` means the session is not logged in.
 
-| Path | Cmd | Body |
-|---|---|---|
-| `/v1/message/send` | 100 | `{1 convId, 2 1, 3 shortId, 4 content, 5 ext, 6 type, 7 "deprecated", 8 clientMsgId}` |
-| `/v2/message/get_by_user_init` | 203 | `{1 offset}` → `{1 messages, 2 conversations, 4 next, 5 hasMore}` |
-| `/v1/message/get_by_conversation` | 301 | `{1 convId, 2 1, 3 shortId, 4 1, 5 anchorIndex, 6 limit}` |
-| `/v3/conversation/mark_read` | 2002 | body at field 604: `{1 convId, 2 shortId, 3 1, 4 index, 11 4}` |
-| `/v1/media/upload_config` | 2059 | empty → ImageX STS credentials |
-| `/v1/message/set_property` | 705 | see [Reactions](#reactions) |
+| Path                              | Cmd  | Body                                                                                  |
+| --------------------------------- | ---- | ------------------------------------------------------------------------------------- |
+| `/v1/message/send`                | 100  | `{1 convId, 2 1, 3 shortId, 4 content, 5 ext, 6 type, 7 "deprecated", 8 clientMsgId}` |
+| `/v2/message/get_by_user_init`    | 203  | `{1 offset}` → `{1 messages, 2 conversations, 4 next, 5 hasMore}`                     |
+| `/v1/message/get_by_conversation` | 301  | `{1 convId, 2 1, 3 shortId, 4 1, 5 anchorIndex, 6 limit}`                             |
+| `/v3/conversation/mark_read`      | 2002 | body at field 604: `{1 convId, 2 shortId, 3 1, 4 index, 11 4}`                        |
+| `/v1/media/upload_config`         | 2059 | empty → ImageX STS credentials                                                        |
+| `/v1/message/set_property`        | 705  | see [Reactions](#reactions)                                                           |
 
 A one-to-one `convId` is `0:1:<smaller uid>:<larger uid>`.
 
@@ -64,14 +64,14 @@ MessageBody {1 convId, 3 serverMsgId, 4 index, 5 shortId, 6 type, 7 sender, 8 co
              9 ext, 10 createdAt (ms), 15 reactions, 18 quote, 20 attachments}
 ```
 
-| Type | Kind | Content |
-|---|---|---|
-| `7` | Text | `{"aweType":0,"text":"…"}` |
-| `1802` | Private image | attachments → 4 |
-| `1805` | Sticker | attachments → 7 |
-| `8` | Shared video | — |
-| `1` | System | — |
-| `50001` | Hidden command | read receipts etc. |
+| Type    | Kind           | Content                    |
+| ------- | -------------- | -------------------------- |
+| `7`     | Text           | `{"aweType":0,"text":"…"}` |
+| `1802`  | Private image  | attachments → 4            |
+| `1805`  | Sticker        | attachments → 7            |
+| `8`     | Shared video   | —                          |
+| `1`     | System         | —                          |
+| `50001` | Hidden command | read receipts etc.         |
 
 ### Reactions
 
@@ -101,13 +101,13 @@ Frame       {1 seq, 2 logid, 3 5, 4 1, 5 headers, 6 encoding, 7 "pb", 8 Response
 Ack         {1 seq, 2 logid, 3 5, 4 1, 5 {is_ack: 1, ack_id, ack_code: 0}, 9 ack_id}
 ```
 
-| Rule | Value |
-|---|---|
-| New message | `Response.cmd = 500`, message at `body[500][5]` |
-| Compression | `encoding = "__lz4"` → LZ4 block |
-| Keep-alive | send text `"hi"` every 15 s |
-| Ack | when header `need_ack=1`; `ack_id = <Date.now() base36>:<x_frontier_traceid>` |
-| Duplicates | the same message may be pushed several times — dedupe by id |
+| Rule        | Value                                                                         |
+| ----------- | ----------------------------------------------------------------------------- |
+| New message | `Response.cmd = 500`, message at `body[500][5]`                               |
+| Compression | `encoding = "__lz4"` → LZ4 block                                              |
+| Keep-alive  | send text `"hi"` every 15 s                                                   |
+| Ack         | when header `need_ack=1`; `ack_id = <Date.now() base36>:<x_frontier_traceid>` |
+| Duplicates  | the same message may be pushed several times — dedupe by id                   |
 
 ## Images
 

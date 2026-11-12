@@ -1,12 +1,10 @@
-import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import WebSocket from 'ws';
-import { AID_FRONTIER, Cmd, FRONTIER_APP_KEY, FRONTIER_FPID, FRONTIER_SALT, IM_WS, Resp, WEB } from './constants';
-import type { Context } from './context';
-import { lz4Decompress } from './lz4';
-import { parseMessage } from './message';
-import { Msg, Writer } from './proto';
-import type { TikTokMessage } from './types';
+import { AID_FRONTIER, FRONTIER_FPID, IM_WS, WEB } from '../protocol/constants';
+import type { Context } from '../protocol/context';
+import { parseMessage } from '../models/message';
+import type { TikTokMessage } from '../models/types';
+import { accessKey, buildAck, newMessageBody, parseFrame } from './frame';
 
 /** The browser sends "hi" every 15–30 seconds; use the lower bound. */
 const HEARTBEAT_MS = 15_000;
@@ -31,15 +29,6 @@ export interface ListenerEvents {
   error: [Error];
 }
 
-/** "Frontier" websocket frame: {1 seqid, 2 logid, 3 service, 4 method, 5 headers, 6 encoding, 7 type, 8 payload}. */
-interface Frame {
-  seq: bigint;
-  logId: bigint;
-  headers: Record<string, string>;
-  encoding: string;
-  payload: Buffer;
-}
-
 /**
  * Listen for new messages via the `im-ws-sg` websocket (aid 1459) — cookies only.
  * Events: `connected`, `message`, `closed`, `error`.
@@ -62,15 +51,12 @@ export class Listener extends EventEmitter<ListenerEvents> {
   }
 
   url(): string {
-    const accessKey = createHash('md5')
-      .update(FRONTIER_FPID + FRONTIER_APP_KEY + this.ctx.deviceId + FRONTIER_SALT)
-      .digest('hex');
     const q = new URLSearchParams({
       aid: AID_FRONTIER,
       fpid: FRONTIER_FPID,
       device_platform: 'web',
       version_code: 'fws_1.0.0',
-      access_key: accessKey,
+      access_key: accessKey(this.ctx.deviceId),
       device_id: this.ctx.deviceId,
       // Cookie value is already URL-encoded (`1%7C…`) — decode it so URLSearchParams doesn't double-encode.
       ttwid: decodeURIComponent(this.ctx.cookies.get('ttwid') ?? ''),
@@ -149,21 +135,9 @@ export class Listener extends EventEmitter<ListenerEvents> {
   }
 
   private onFrame(ws: WebSocket, data: Buffer): void {
-    const m = Msg.parse(data);
-    const frame: Frame = {
-      seq: m.int(1),
-      logId: m.int(2),
-      headers: m.map(5),
-      encoding: m.str(6),
-      payload: m.bytes(8),
-    };
-    if (frame.headers.need_ack === '1') this.ack(ws, frame);
-    if (frame.payload.length === 0) return;
-    const payload = frame.encoding === '__lz4' ? lz4Decompress(frame.payload) : frame.payload;
-    const resp = Msg.tryParse(payload);
-    if (!resp || resp.num(Resp.cmd) !== Cmd.NewMessage) return;
-    // NewMessageNotify: {2 conversationId, 3 type, 4 ?, 5 MessageBody}
-    const body = resp.msg(Resp.body)?.msg(Cmd.NewMessage)?.msg(5);
+    const frame = parseFrame(data);
+    if (frame.headers.need_ack === '1' && ws.readyState === WebSocket.OPEN) ws.send(buildAck(frame));
+    const body = newMessageBody(frame);
     if (!body) return;
     const msg = parseMessage(body, this.ctx.ownId);
     if (!msg.serverMessageId || this.seen.has(msg.serverMessageId)) return;
@@ -171,19 +145,5 @@ export class Listener extends EventEmitter<ListenerEvents> {
     if (this.seen.size > DEDUPE_KEEP) this.seen.delete(this.seen.values().next().value as string);
     if (msg.kind === 'command') this.emit('command', msg);
     else this.emit('message', msg);
-  }
-
-  /** Acknowledge receipt — `ack_id = <base36 time>:<x_frontier_traceid>`, echoing the frame's seq/logid. */
-  private ack(ws: WebSocket, f: Frame): void {
-    const ackId = `${Date.now().toString(36)}:${f.headers.x_frontier_traceid ?? ''}`;
-    const out = new Writer()
-      .int(1, f.seq)
-      .int(2, f.logId)
-      .int(3, 5)
-      .int(4, 1)
-      .map(5, { is_ack: '1', ack_id: ackId, ack_code: '0' })
-      .bytes(9, ackId)
-      .finish();
-    if (ws.readyState === WebSocket.OPEN) ws.send(out);
   }
 }

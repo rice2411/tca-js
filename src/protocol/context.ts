@@ -1,7 +1,7 @@
 import { AID_WEB, BUILD_NUMBER, DEFAULT_USER_AGENT, IM_API, Resp, SDK_VERSION, WEB } from './constants';
-import { TikTokError } from './errors';
+import { TikTokError } from '../errors';
 import { Msg, Writer } from './proto';
-import type { CookieInput, Credentials, TikTokOptions } from './types';
+import type { CookieInput, Credentials, TikTokOptions } from '../models/types';
 
 /** `name → value` cookies from any input shape of `Credentials.cookies`. */
 export function normalizeCookies(input: Credentials['cookies']): Map<string, string> {

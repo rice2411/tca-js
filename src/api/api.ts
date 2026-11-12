@@ -1,22 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import {
-  AID_FRONTIER,
-  Cmd,
-  ConversationType,
-  MARK_READ_BODY_FIELD,
-  MessageType,
-  PropertyOp,
-  REACTION_HEART,
-  REACTION_LOVE_KEY,
-  REACTION_PREFIX,
-  WEB,
-} from './constants';
-import type { Context } from './context';
-import { TikTokError } from './errors';
-import { Listener } from './listener';
-import { MediaClient } from './media';
-import { parseConversation, parseMessage } from './message';
-import { Writer } from './proto';
+import { Cmd, MARK_READ_BODY_FIELD, MessageType, WEB } from '../protocol/constants';
+import type { Context } from '../protocol/context';
+import { Writer } from '../protocol/proto';
+import { TikTokError } from '../errors';
+import { Listener } from '../listener/listener';
+import { parseConversation, parseMessage } from '../models/message';
 import type {
   ConversationPage,
   ConversationRef,
@@ -27,10 +15,17 @@ import type {
   TikTokMessage,
   TikTokSticker,
   TikTokUser,
-} from './types';
-
-/** "Latest" cursor for reading history — greater than any `index` (µs). */
-const NEWEST = 9_999_999_999_999_999n;
+} from '../models/types';
+import { avatarLinks, fetchAccount } from './account';
+import { MediaClient } from './media';
+import {
+  getMessagesBody,
+  imageMessageExtra,
+  markReadBody,
+  reactionOps,
+  sendMessageBody,
+  setPropertyBody,
+} from './requests';
 
 /** Send result: client-side message id (TikTok echoes it back). The server id arrives via the listener (`isSelf`). */
 export interface SendResult {
@@ -75,7 +70,11 @@ export class API {
 
   /** Recent conversations + their latest messages, paginated with `cursor`. */
   async getConversations(cursor = '0'): Promise<ConversationPage> {
-    const body = await this.ctx.im('/v2/message/get_by_user_init', Cmd.GetMessagesByUserInit, new Writer().int(1, BigInt(cursor)).finish());
+    const body = await this.ctx.im(
+      '/v2/message/get_by_user_init',
+      Cmd.GetMessagesByUserInit,
+      new Writer().int(1, BigInt(cursor)).finish(),
+    );
     return {
       messages: body.msgs(1).map((m) => parseMessage(m, this.ctx.ownId)),
       conversations: body.msgs(2).map((m) => parseConversation(m, this.ctx.ownId)),
@@ -91,14 +90,7 @@ export class API {
     const body = await this.ctx.im(
       '/v1/message/get_by_conversation',
       Cmd.GetMessagesByConversation,
-      new Writer()
-        .bytes(1, conv.conversationId)
-        .int(2, ConversationType.OneToOne)
-        .int(3, BigInt(conv.conversationShortId))
-        .int(4, 1) // direction: older than cursor
-        .int(5, opts.before ? BigInt(opts.before) : NEWEST)
-        .int(6, limit)
-        .finish(),
+      getMessagesBody(conv, limit, opts.before),
     );
     const messages = body.msgs(1).map((m) => parseMessage(m, this.ctx.ownId));
     return { messages, hasMore: messages.length >= limit };
@@ -156,18 +148,7 @@ export class API {
 
   /** Mark as read up to message `msg`. */
   async markRead(msg: ConversationRef & { index: string }): Promise<void> {
-    await this.ctx.im(
-      '/v3/conversation/mark_read',
-      Cmd.MarkRead,
-      new Writer()
-        .bytes(1, msg.conversationId)
-        .int(2, BigInt(msg.conversationShortId))
-        .int(3, ConversationType.OneToOne)
-        .int(4, BigInt(msg.index))
-        .int(11, 4)
-        .finish(),
-      MARK_READ_BODY_FIELD,
-    );
+    await this.ctx.im('/v3/conversation/mark_read', Cmd.MarkRead, markReadBody(msg), MARK_READ_BODY_FIELD);
   }
 
   // ─── Send ─────────────────────────────────────────────────────────────────
@@ -183,49 +164,7 @@ export class API {
   async sendImage(conv: ConversationRef, image: ImageInput): Promise<SendResult> {
     const up = await this.media.upload(image);
     const cid = randomUUID();
-    const w = String(up.width);
-    const h = String(up.height);
-    const media = new Writer()
-      .msg(
-        1,
-        new Writer()
-          .bytes(1, up.uri)
-          .msg(5, new Writer().int(1, up.width).int(2, up.height))
-          .bytes(6, up.secretKey)
-          .int(7, 0),
-      )
-      .msg(
-        3,
-        new Writer()
-          .msg(1, new Writer().bytes(1, 'You sent a 📷'))
-          .msg(2, new Writer().bytes(1, 'sent a 📷'))
-          .msg(3, new Writer().bytes(1, '[Photo]')),
-      )
-      .msg(
-        200,
-        new Writer().msg(
-          1,
-          new Writer().bytes(1, up.uri).map(2, {
-            image_width: w,
-            image_height: h,
-            decrypt_key: up.secretKey,
-            quote_preview: 'dm_cam_preview_photo',
-            sender_preview: 'sender_preview',
-          }),
-        ),
-      );
-    const extra = new Writer()
-      .msg(13, new Writer().msg(4, media))
-      .bytes(14, 'private_image')
-      .msg(
-        17,
-        new Writer()
-          .int(1, 1)
-          .bytes(2, up.uri)
-          .bytes(3, up.secretKey)
-          .msg(10, new Writer().int(1, up.width).int(2, up.height).int(4, up.size).bytes(5, up.filename)),
-      );
-    await this.send(conv, cid, MessageType.PrivateImage, '', extra);
+    await this.send(conv, cid, MessageType.PrivateImage, '', imageMessageExtra(up));
     return { clientMessageId: cid };
   }
 
@@ -236,32 +175,15 @@ export class API {
    */
   async setReaction(msg: TikTokMessage, emoji: string | null): Promise<void> {
     const own = this.ctx.ownId;
-    const mine = msg.reactions.filter((r) => r.userIds.includes(own)).map((r) => r.emoji);
-    const ops: { op: number; key: string }[] = [];
-    if (emoji && !mine.includes(emoji)) ops.push({ op: PropertyOp.Add, key: REACTION_PREFIX + emoji });
-    for (const e of mine) {
-      if (e === emoji) continue;
-      ops.push({ op: PropertyOp.Remove, key: REACTION_PREFIX + e });
-      // ❤️ sent from the mobile app still uses the legacy key `e:love` — remove it too or the app keeps showing the heart.
-      if (e === REACTION_HEART) ops.push({ op: PropertyOp.Remove, key: REACTION_LOVE_KEY });
-    }
+    const ops = reactionOps(msg, own, emoji);
     if (ops.length === 0) return;
-    const target = new Writer()
-      .bytes(1, msg.conversationId)
-      .int(2, ConversationType.OneToOne)
-      .int(3, BigInt(msg.conversationShortId))
-      .int(4, BigInt(msg.serverMessageId))
-      .bytes(5, msg.clientMessageId);
-    for (const o of ops) target.msg(6, new Writer().int(1, o.op).bytes(2, o.key).bytes(4, own));
-    const body = await this.ctx.im(
-      '/v1/message/set_property',
-      Cmd.SetMessageProperty,
-      new Writer().msg(1, target).bytes(2, 'deprecated').finish(),
-    );
+    const body = await this.ctx.im('/v1/message/set_property', Cmd.SetMessageProperty, setPropertyBody(msg, ops, own));
     // status: 0 success, 1 duplicate (also done); anything else means TikTok rejected it.
     const status = body.num(1);
     if (status > 1) throw new TikTokError('IM_ERROR', `set_property: status ${status}`, status);
   }
+
+  // ─── Media ─────────────────────────────────────────────────────────────────
 
   /** Download a sticker image (public CDN, unencrypted, no cookie needed). */
   async downloadSticker(sticker: Pick<TikTokSticker, 'url'>): Promise<{ data: Buffer; type: string }> {
@@ -286,64 +208,16 @@ export class API {
     return this.media.download(image, which);
   }
 
-  /** `SendMessageRequestBody`: {1 convId, 2 conversation type, 3 shortId, 4 content, 5 ext, 6 message type, 7 ticket, 8 client id, …}. */
-  private async send(conv: ConversationRef, cid: string, type: number, content: string, extra: Writer | null): Promise<void> {
+  private async send(
+    conv: ConversationRef,
+    cid: string,
+    type: number,
+    content: string,
+    extra: Writer | null,
+  ): Promise<void> {
     if (!conv.conversationId || !conv.conversationShortId) {
       throw new TikTokError('IM_ERROR', 'Missing conversationId / conversationShortId');
     }
-    const w = new Writer()
-      .bytes(1, conv.conversationId)
-      .int(2, ConversationType.OneToOne)
-      .int(3, BigInt(conv.conversationShortId))
-      .bytes(4, content)
-      .map(5, { 's:mentioned_users': '', 's:client_message_id': cid })
-      .int(6, type)
-      .bytes(7, 'deprecated')
-      .bytes(8, cid);
-    const body = extra ? Buffer.concat([w.finish(), extra.finish()]) : w.finish();
-    await this.ctx.im('/v1/message/send', Cmd.SendMessage, body);
+    await this.ctx.im('/v1/message/send', Cmd.SendMessage, sendMessageBody(conv, cid, type, content, extra));
   }
 }
-
-/** Account for the cookie — `null` if the cookie is no longer logged in. */
-export async function fetchAccount(ctx: Context): Promise<TikTokAccount | null> {
-  type Res = {
-    message?: string;
-    data?: { user_id_str?: string; username?: string; screen_name?: string; avatar_url?: string; error_code?: number };
-  };
-  const res = await ctx.getJson<Res>(`${WEB}/passport/web/account/info/?aid=${AID_FRONTIER}`);
-  if (res.message !== 'success' || !res.data?.user_id_str) return null;
-  return {
-    uid: res.data.user_id_str,
-    username: res.data.username ?? '',
-    screenName: res.data.screen_name ?? '',
-    avatar: res.data.avatar_url ?? '',
-  };
-}
-
-/**
- * Avatar URLs from the IM profile `avatars` — collects every `https://…` string (thumb → medium → larger, whatever
- * TikTok returns), then puts browser-readable ones (jpeg/webp/png) first and heic last.
- */
-function avatarLinks(avatars: unknown): { avatar: string; avatars: string[] } {
-  const urls: string[] = [];
-  const walk = (v: unknown) => {
-    if (typeof v === 'string') {
-      if (/^https?:\/\//.test(v) && !urls.includes(v)) urls.push(v);
-    } else if (Array.isArray(v)) v.forEach(walk);
-    else if (v && typeof v === 'object') Object.values(v).forEach(walk);
-  };
-  walk(avatars);
-  const heic = (u: string) => /\.heic(\?|$)/i.test(u.split('?')[0] + '?');
-  const ranked = [...urls.filter((u) => !heic(u)), ...urls.filter(heic)];
-  return { avatar: ranked[0] ?? '', avatars: ranked };
-}
-
-/** `wid` — device id TikTok issues per `ttwid` cookie; IM + websocket use it as `device_id`. */
-export async function fetchWebId(ctx: Context): Promise<string> {
-  const res = await ctx.fetch(`${WEB}/api/v1/web-cookie-privacy/config?locale=vi-VN&appId=1988&theme=default&tea=1`);
-  if (!res.ok) return '';
-  return /"wid":"(\d+)"/.exec(await res.text())?.[1] ?? '';
-}
-
-export type { TikTokMessage };

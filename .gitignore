@@ -3,3 +3,6 @@ dist/
 *.log
 cookies*.json
 .DS_Store
+coverage/
+credentials*.json
+qr.png

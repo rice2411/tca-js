@@ -10,39 +10,18 @@
  * api.listener.start();
  * ```
  *
- * Getting cookies the first time: `loginQR({ chromePath, onEvent })` — opens headless Chrome on TikTok's QR page
+ * Getting cookies the first time: `loginQR({ onEvent })` — opens headless Chrome on TikTok's QR page
  * (the login API requires a JS signature so it can't be done in pure Node), returns cookies after scanning. See README.
  */
-import { API, fetchAccount, fetchWebId } from './api';
-import { Context } from './context';
-import { TikTokError } from './errors';
-import type { Credentials, TikTokOptions } from './types';
-
-export class TikTok {
-  constructor(private readonly options: TikTokOptions = {}) {}
-
-  /** Log in with existing cookies. Expired cookies → `TikTokError('SESSION_EXPIRED')`. */
-  async login(credentials: Credentials): Promise<API> {
-    const ctx = new Context(credentials, this.options);
-    if (!ctx.cookies.get('sessionid') && !ctx.cookies.get('sid_tt')) {
-      throw new TikTokError('SESSION_EXPIRED', 'Cookie has no sessionid');
-    }
-    const account = await fetchAccount(ctx);
-    if (!account) throw new TikTokError('SESSION_EXPIRED', 'TikTok cookie is no longer logged in');
-    ctx.ownId = account.uid;
-    ctx.deviceId = (await fetchWebId(ctx).catch(() => '')) || ctx.deviceId;
-    if (!ctx.deviceId) throw new TikTokError('BAD_RESPONSE', 'Could not get wid (device_id) — cookie missing ttwid?');
-    return new API(ctx, account);
-  }
-}
-
-export { API } from './api';
-export type { SendResult } from './api';
-export { MessageType } from './constants';
+export { TikTok } from './client';
+export { API } from './api/api';
+export type { SendResult } from './api/api';
+export { MessageType } from './protocol/constants';
 export { TikTokError } from './errors';
 export type { TikTokErrorCode } from './errors';
-export { Listener, MANUAL_CLOSE } from './listener';
-export { loginQR } from './qr-login';
-export type { QrLoginEvent, QrLoginOptions } from './qr-login';
-export type { ListenerEvents } from './listener';
-export type * from './types';
+export { Listener, MANUAL_CLOSE } from './listener/listener';
+export type { ListenerEvents } from './listener/listener';
+export { loginQR } from './auth/qr-login';
+export type { QrLoginEvent, QrLoginOptions } from './auth/qr-login';
+export { findChrome } from './auth/chrome';
+export type * from './models/types';

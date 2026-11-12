@@ -1,5 +1,5 @@
-import { MessageType, MsgF, REACTION_HEART, REACTION_LOVE_KEY, REACTION_PREFIX } from './constants';
-import { Msg } from './proto';
+import { MessageType, MsgF, REACTION_HEART, REACTION_LOVE_KEY, REACTION_PREFIX } from '../protocol/constants';
+import { Msg } from '../protocol/proto';
 import type { TikTokConversation, TikTokImage, TikTokMessage, TikTokReaction, TikTokSticker } from './types';
 
 function parseJson(s: string): unknown {

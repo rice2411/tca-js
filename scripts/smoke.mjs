@@ -9,10 +9,16 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { TikTok } from '../dist/index.js';
+import { TikTok } from '../dist/index.mjs';
 
 const args = Object.fromEntries(
-  process.argv.slice(2).reduce((acc, a, i, all) => (a.startsWith('--') ? [...acc, [a.slice(2), all[i + 1]?.startsWith('--') ? true : all[i + 1] ?? true]] : acc), []),
+  process.argv
+    .slice(2)
+    .reduce(
+      (acc, a, i, all) =>
+        a.startsWith('--') ? [...acc, [a.slice(2), all[i + 1]?.startsWith('--') ? true : (all[i + 1] ?? true)]] : acc,
+      [],
+    ),
 );
 if (!args.cookies) {
   console.error('Missing --cookies <file.json>');
@@ -27,7 +33,12 @@ const api = await new TikTok({ logger: (lv, m) => log(`[${lv}]`, m) }).login({
 log('Logged in:', `@${api.account.username}`, api.getOwnId(), 'device', api.getContext().deviceId);
 
 const page = await api.getConversations();
-const users = await api.getUsers(page.conversations.map((c) => c.peerId).filter(Boolean).slice(0, 20));
+const users = await api.getUsers(
+  page.conversations
+    .map((c) => c.peerId)
+    .filter(Boolean)
+    .slice(0, 20),
+);
 const name = Object.fromEntries(users.map((u) => [u.uid, `${u.nickname} (@${u.uniqueId})`]));
 log(`Conversations: ${page.conversations.length} (more: ${page.hasMore})`);
 for (const c of page.conversations.slice(0, 10)) {
@@ -40,7 +51,8 @@ if (args.peer && !conv) throw new Error(`No conversation found with ${args.peer}
 if (conv) {
   const { messages } = await api.getMessages(conv, { limit: 10 });
   log(`Last 10 messages with ${name[conv.peerId] ?? conv.peerId}:`);
-  for (const m of messages) log('  ', m.isSelf ? '→' : '←', m.kind, m.text.slice(0, 50), m.image ? `${m.image.width}x${m.image.height}` : '');
+  for (const m of messages)
+    log('  ', m.isSelf ? '→' : '←', m.kind, m.text.slice(0, 50), m.image ? `${m.image.width}x${m.image.height}` : '');
   const img = messages.find((m) => m.image);
   if (img) {
     const buf = await api.downloadImage(img);
@@ -54,7 +66,13 @@ api.listener.on('error', (e) => log('Listener error:', e.message));
 api.listener.on('closed', (c, r) => log('Listener closed:', c, r));
 api.listener.on('message', (m) => {
   echoes.push(m);
-  log('Listener ←', m.isSelf ? '(self)' : name[m.senderId] ?? m.senderId, `${m.kind}/${m.type}`, m.text.slice(0, 60), m.image ? `${m.image.width}x${m.image.height}` : '');
+  log(
+    'Listener ←',
+    m.isSelf ? '(self)' : (name[m.senderId] ?? m.senderId),
+    `${m.kind}/${m.type}`,
+    m.text.slice(0, 60),
+    m.image ? `${m.image.width}x${m.image.height}` : '',
+  );
 });
 api.listener.start();
 await new Promise((resolve, reject) => {
@@ -68,7 +86,10 @@ await new Promise((resolve, reject) => {
 if (conv && args.text) log('Sent text:', (await api.sendMessage(conv, String(args.text))).clientMessageId);
 if (conv && args.image) {
   const file = String(args.image);
-  log('Sent image:', (await api.sendImage(conv, { data: fs.readFileSync(file), filename: path.basename(file) })).clientMessageId);
+  log(
+    'Sent image:',
+    (await api.sendImage(conv, { data: fs.readFileSync(file), filename: path.basename(file) })).clientMessageId,
+  );
 }
 
 await new Promise((r) => setTimeout(r, Number(args.listen ?? 10) * 1000));
