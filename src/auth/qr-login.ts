@@ -1,7 +1,8 @@
 import { rm } from 'node:fs/promises';
 import { DEFAULT_USER_AGENT, WEB } from '../protocol/constants';
 import { TikTokError } from '../errors';
-import type { CookieInput, Credentials } from '../models/types';
+import type { CookieInput, Credentials, TicketGuard } from '../models/types';
+import { isTicketGuard, READ_TICKET_GUARD_JS } from '../protocol/ticket-guard';
 import { openTab, type Cdp } from './cdp';
 import { launchChrome, resolveChromePath } from './chrome';
 
@@ -87,6 +88,35 @@ export async function loginQR(opts: QrLoginOptions): Promise<Credentials> {
         }
       };
 
+      /**
+       * Ticket-guard signing material (needed to send since 12/11/2026). The security SDK stores it right after login;
+       * if the post-login page didn't, open /messages (it signs `message/send`) and wait. `undefined` if never found.
+       */
+      const readTicketGuard = async (): Promise<TicketGuard | undefined> => {
+        const read = async () => {
+          const r = await tab
+            .send<{ result?: { value?: unknown } }>('Runtime.evaluate', {
+              expression: READ_TICKET_GUARD_JS,
+              awaitPromise: true,
+              returnByValue: true,
+            })
+            .catch(() => null);
+          return isTicketGuard(r?.result?.value) ? r.result.value : undefined;
+        };
+        for (let i = 0; i < 8 && !done; i++) {
+          const g = await read();
+          if (g) return g;
+          await new Promise((r) => setTimeout(r, 1000));
+        }
+        await tab.send('Page.navigate', { url: `${WEB}/messages` }).catch(() => undefined);
+        for (let i = 0; i < 20 && !done; i++) {
+          await new Promise((r) => setTimeout(r, 1000));
+          const g = await read();
+          if (g) return g;
+        }
+        return undefined;
+      };
+
       /** After `confirmed`: the page redirects and sets session cookies — wait for `sessionid`. */
       const collectCookies = async () => {
         for (let i = 0; i < 30 && !done; i++) {
@@ -102,7 +132,8 @@ export async function loginQR(opts: QrLoginOptions): Promise<Credentials> {
             )) {
               byName.set(c.name, { name: c.name, value: c.value });
             }
-            return finish(null, { cookies: [...byName.values()], userAgent });
+            const ticketGuard = await readTicketGuard();
+            return finish(null, { cookies: [...byName.values()], userAgent, ...(ticketGuard ? { ticketGuard } : {}) });
           }
           await new Promise((r) => setTimeout(r, 1000));
         }

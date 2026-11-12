@@ -15,6 +15,7 @@ import type {
   TikTokMessage,
   TikTokSticker,
   TikTokUser,
+  TicketGuard,
 } from '../models/types';
 import { avatarLinks, fetchAccount } from './account';
 import { MediaClient } from './media';
@@ -57,8 +58,9 @@ export class API {
     return [...this.ctx.cookies].map(([name, value]) => ({ name, value }));
   }
 
-  getContext(): { deviceId: string; userAgent: string } {
-    return { deviceId: this.ctx.deviceId, userAgent: this.ctx.userAgent };
+  /** Non-cookie session state to save alongside the cookies (pass back into `login`). */
+  getContext(): { deviceId: string; userAgent: string; ticketGuard?: TicketGuard } {
+    return { deviceId: this.ctx.deviceId, userAgent: this.ctx.userAgent, ticketGuard: this.ctx.ticketGuard };
   }
 
   /** Whether the session is still alive — call periodically to detect expiry early. */

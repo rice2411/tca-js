@@ -11,6 +11,23 @@ export interface Credentials {
   /** IM device id (`wid`) — leave empty and `login` asks TikTok using `ttwid`. Only used when that fails. */
   deviceId?: string;
   userAgent?: string;
+  /**
+   * Request-signing material captured at login (`loginQR` fills it). Required to SEND messages since 12/11/2026 —
+   * without it TikTok blocks the session's sends after the first one (`SESSION_BLOCKED`). Keep it with the cookies.
+   */
+  ticketGuard?: TicketGuard;
+}
+
+/** TikTok "ticket guard" signing material — see `protocol/ticket-guard.ts`. Secret: treat like the session cookie. */
+export interface TicketGuard {
+  /** EC P-256 private key, PKCS#8 PEM. */
+  privateKey: string;
+  /** Matching public key, SPKI PEM. */
+  publicKey: string;
+  /** Server-issued `ts_sign` bound to the public key. */
+  tsSign: string;
+  /** Server-issued ticket (plain text). */
+  ticket: string;
 }
 
 export interface TikTokOptions {

@@ -1,6 +1,6 @@
 {
   "name": "tca-js",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "Unofficial TikTok Chat API for JavaScript — read/send TikTok direct messages (text, images, reactions) and listen over websocket using session cookies, no browser needed.",
   "license": "MIT",
   "author": "rice2411",

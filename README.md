@@ -86,6 +86,11 @@ await new TikTok().login({ cookies: 'sessionid=…; ttwid=…' }); // header str
 Required cookies: `sessionid`, `sid_tt`, `sid_guard`, `uid_tt`, `ttwid`, `odin_tt`, `store-idc`, `tt-target-idc`.
 A session lasts about 6 months, and logging in does not sign out other devices.
 
+> **Sending needs `ticketGuard`** (since 12/11/2026). TikTok signs `message/send` with a per-login key pair; a session
+> that sends unsigned gets blocked after its first message (`SESSION_BLOCKED`). Cookies alone are enough to READ, but
+> to send use credentials from `loginQR` (which captures `ticketGuard`) and persist them as a whole — including
+> `api.getContext().ticketGuard`. Treat it as secret as the cookies.
+
 ### QR code
 
 `loginQR` opens a headless Chrome on TikTok's QR page, emits the QR image, and resolves with credentials once the code is
@@ -101,7 +106,7 @@ const credentials = await loginQR({
 });
 
 const api = await new TikTok().login(credentials);
-// Save `credentials` to skip scanning next time.
+// Save `credentials` (cookies + ticketGuard) to skip scanning next time — both are secrets.
 ```
 
 | Option       | Type          | Default     | Description                                                                        |
@@ -143,12 +148,13 @@ with `sendMessage(msg, …)`.
 
 ### Session
 
-| Method / property | Description                                                  |
-| ----------------- | ------------------------------------------------------------ |
-| `account`         | Logged-in account: `uid`, `username`, `screenName`, `avatar` |
-| `getOwnId()`      | Own user id                                                  |
-| `getCookies()`    | Current cookies — persist them to resume the session         |
-| `isAlive()`       | `true` while the session is still valid                      |
+| Method / property | Description                                                   |
+| ----------------- | ------------------------------------------------------------- |
+| `account`         | Logged-in account: `uid`, `username`, `screenName`, `avatar`  |
+| `getOwnId()`      | Own user id                                                   |
+| `getCookies()`    | Current cookies — persist them to resume the session          |
+| `getContext()`    | `deviceId`, `userAgent`, `ticketGuard` — persist with cookies |
+| `isAlive()`       | `true` while the session is still valid                       |
 
 ### Message object
 
@@ -184,14 +190,14 @@ api.listener.stop();
 
 All library errors are instances of `TikTokError` with a `code`:
 
-| Code                                | Meaning                                                                                       |
-| ----------------------------------- | --------------------------------------------------------------------------------------------- |
-| `SESSION_EXPIRED`                   | Cookies are no longer valid — log in again                                                    |
-| `SESSION_BLOCKED`                   | TikTok's gateway refuses this session (JSON `status_code: 7`, seen on sending) — log in again |
-| `IM_ERROR`                          | TikTok rejected the request                                                                   |
-| `HTTP_ERROR` · `BAD_RESPONSE`       | Network or unexpected response                                                                |
-| `UPLOAD_FAILED` · `DOWNLOAD_FAILED` | Media transfer failed                                                                         |
-| `LOGIN_FAILED` · `LOGIN_ABORTED`    | QR login failed or was cancelled                                                              |
+| Code                                | Meaning                                                                                                                         |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `SESSION_EXPIRED`                   | Cookies are no longer valid — log in again                                                                                      |
+| `SESSION_BLOCKED`                   | TikTok's gateway refuses this session (JSON `status_code: 7`) — usually sent without `ticketGuard`; log in again with `loginQR` |
+| `IM_ERROR`                          | TikTok rejected the request                                                                                                     |
+| `HTTP_ERROR` · `BAD_RESPONSE`       | Network or unexpected response                                                                                                  |
+| `UPLOAD_FAILED` · `DOWNLOAD_FAILED` | Media transfer failed                                                                                                           |
+| `LOGIN_FAILED` · `LOGIN_ABORTED`    | QR login failed or was cancelled                                                                                                |
 
 ```ts
 import { TikTokError } from 'tca-js';

@@ -49,7 +49,25 @@ Response {1 cmd, 3 status_code, 4 error, 6 {<cmd>: body}}
 A JSON body (`{"status_code": 7, …}`, `content-type: application/json`) instead of protobuf comes from the gateway in
 front of IM: it refused the request before IM saw it. 12/11/2026 one stored session got 7 on every `message/send`
 (even a garbage body) while reads worked; a fresh login passed, unsigned. The web client now also sends
-`tt-ticket-guard-*` headers + `X-Gnarly`/`X-Dynosaur` on `message/send` only — not enforced yet.
+`tt-ticket-guard-*` headers + `X-Gnarly`/`X-Dynosaur` on `message/send` only.
+
+### Ticket guard (`message/send`, enforced 12/11/2026)
+
+A session that sends without it is blocked after the first send (gateway `status_code: 7` on every later send).
+X-Gnarly / X-Dynosaur are NOT required. Source: `secsdk` in `webapp-desktop/static/js/async/76557.*.js`.
+
+- Login: the page generates an EC P-256 key pair (jsrsasign), sends `tt-ticket-guard-public-key`, the server answers
+  `tt-ticket-guard-server-data` = base64 JSON `{tickets: [{ticket, ts_sign, …}]}`.
+- Storage (IndexedDB `secure-store` → `cryptvalues`): `security-sdk/s_sdk_crypt_sdk` = `{"data": JSON {ec_privateKey,
+ec_publicKey}}` (plain PEM); `security-sdk/s_sdk_sign_data_key/tt_fetch` = `{"data": JSON {ts_sign,
+encrypt_ticket}}`, `encrypt_ticket` = base64(iv[12] ‖ AES-GCM) with key = PBKDF2-SHA256("tt-ticket-guard-iv",
+  salt "secure-salt", 1000 iterations, 128 bit).
+- Per request: `req_sign` = base64 DER ECDSA-SHA256 over `ticket=<ticket>&path=<url path>&timestamp=<unix s>`;
+  headers `tt-ticket-guard-client-data` = base64 JSON `{ts_sign, req_content: "ticket,path,timestamp", req_sign,
+timestamp}`, `tt-ticket-guard-public-key` = base64 uncompressed point (65 bytes), `tt-ticket-guard-version: 2`,
+  `tt-ticket-guard-web-version: 1`, `tt-ticket-guard-iteration-version: 0`.
+
+`loginQR` reads the store via CDP before closing Chrome (`READ_TICKET_GUARD_JS`); `Context.im` signs `SIGNED_PATHS`.
 
 | Path                              | Cmd  | Body                                                                                  |
 | --------------------------------- | ---- | ------------------------------------------------------------------------------------- |

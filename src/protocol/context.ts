@@ -1,7 +1,8 @@
 import { AID_WEB, BUILD_NUMBER, DEFAULT_USER_AGENT, IM_API, Resp, SDK_VERSION, WEB } from './constants';
 import { TikTokError } from '../errors';
 import { Msg, Writer } from './proto';
-import type { CookieInput, Credentials, TikTokOptions } from '../models/types';
+import type { CookieInput, Credentials, TicketGuard, TikTokOptions } from '../models/types';
+import { isTicketGuard, SIGNED_PATHS, ticketGuardHeaders } from './ticket-guard';
 
 /** `name → value` cookies from any input shape of `Credentials.cookies`. */
 export function normalizeCookies(input: Credentials['cookies']): Map<string, string> {
@@ -28,6 +29,8 @@ export class Context {
    */
   deviceId: string;
   readonly userAgent: string;
+  /** Signing material for `SIGNED_PATHS` — absent for sessions saved before 0.5.0 (sends then go unsigned). */
+  readonly ticketGuard?: TicketGuard;
   ownId = '';
   private seq = 10_000;
 
@@ -38,6 +41,7 @@ export class Context {
     this.cookies = normalizeCookies(creds.cookies);
     this.deviceId = creds.deviceId ?? '';
     this.userAgent = creds.userAgent || DEFAULT_USER_AGENT;
+    if (isTicketGuard(creds.ticketGuard)) this.ticketGuard = creds.ticketGuard;
   }
 
   cookieHeader(): string {
@@ -101,13 +105,18 @@ export class Context {
 
   /**
    * Call an IM command over HTTP. Returns the unwrapped body (`ResponseBody[cmd]`).
-   * NO X-Gnarly/X-Bogus/msToken signature needed — the IM server only checks cookies (tested 09/11/2026).
+   * NO X-Gnarly/X-Bogus/msToken signature needed. `message/send` additionally needs the ticket-guard headers
+   * (enforced 12/11/2026) — added from `ticketGuard` when present.
    */
   async im(path: string, cmd: number, body: Buffer, bodyField: number = cmd): Promise<Msg> {
     const url = `${IM_API}${path}?aid=${AID_WEB}&version_code=1.0.0&app_name=tiktok_web&device_platform=web_pc`;
     const res = await this.fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/x-protobuf', Accept: 'application/x-protobuf' },
+      headers: {
+        'Content-Type': 'application/x-protobuf',
+        Accept: 'application/x-protobuf',
+        ...(this.ticketGuard && SIGNED_PATHS.has(path) ? ticketGuardHeaders(this.ticketGuard, path) : {}),
+      },
       body: new Uint8Array(this.buildRequest(cmd, bodyField, body)),
     });
     if (!res.ok) throw new TikTokError('HTTP_ERROR', `${path}: HTTP ${res.status}`, res.status);
