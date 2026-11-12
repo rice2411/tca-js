@@ -1,17 +1,35 @@
 {
   "name": "tca-js",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Unofficial TikTok Chat API for JavaScript — read/send TikTok direct messages (text, images, reactions) and listen over websocket using session cookies, no browser needed.",
   "license": "MIT",
   "author": "rice2411",
-  "repository": { "type": "git", "url": "git+https://github.com/rice2411/tca-js.git" },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rice2411/tca-js.git"
+  },
   "homepage": "https://github.com/rice2411/tca-js#readme",
-  "bugs": { "url": "https://github.com/rice2411/tca-js/issues" },
-  "keywords": ["tiktok", "tiktok-api", "tiktok-dm", "tiktok-chat", "direct-message", "unofficial", "chat", "websocket"],
+  "bugs": {
+    "url": "https://github.com/rice2411/tca-js/issues"
+  },
+  "keywords": [
+    "tiktok",
+    "tiktok-api",
+    "tiktok-dm",
+    "tiktok-chat",
+    "direct-message",
+    "unofficial",
+    "chat",
+    "websocket"
+  ],
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "files": ["dist"],
-  "engines": { "node": ">=22" },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.json",
     "prepublishOnly": "npm run build",
