@@ -128,6 +128,15 @@ node scripts/smoke.mjs --cookies <cookies.json> [--peer <uid>] [--text "…"] [-
 
 Source comments are in Vietnamese. Issues and PRs welcome in English or Vietnamese.
 
+## Support Us
+
+- ⭐ **Star the repository** if you find it useful!
+- 🔄 **Share** it with your network
+- 💡 **Contribute** ideas and code — issues and PRs welcome
+- ☕ **A coffee** — VietQR (MB Bank · `0776750418`):
+
+  <img src=".github/assets/vietqr-mb.png" alt="VietQR MB Bank 0776750418" width="240">
+
 ## License
 
 [MIT](LICENSE)
